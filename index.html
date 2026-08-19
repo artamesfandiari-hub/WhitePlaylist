@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090909">
+  <title>White Playlist</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- HEADER -->
+  <header class="topbar">
+    <div>
+      <div class="brand">WHITE PLAYLIST</div>
+      <div class="subtitle">Your music library</div>
+    </div>
+    <button class="icon-button" id="searchButton" aria-label="Search">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- SEARCH -->
+  <section class="search-section hidden" id="searchSection">
+    <input id="searchInput" type="search" placeholder="Search songs, artists or albums..." autocomplete="off">
+  </section>
+
+  <!-- CONTENT -->
+  <main id="content">
+
+    <!-- HOME -->
+    <section class="page active" id="homePage">
+      <div class="section-heading">
+        <h2>Recently Added</h2>
+        <button id="seeAllSongs">See all</button>
+      </div>
+      <div class="song-list" id="recentSongs">
+        <div class="loading">Loading...</div>
+      </div>
+    </section>
+
+    <!-- SONGS -->
+    <section class="page" id="songsPage">
+      <div class="page-title-row">
+        <h1>Songs</h1>
+      </div>
+      <div class="song-list" id="allSongs">
+        <div class="loading">Loading...</div>
+      </div>
+    </section>
+
+    <!-- FAVORITES -->
+    <section class="page" id="favoritesPage">
+      <div class="page-title-row">
+        <h1>Favorites</h1>
+      </div>
+      <div class="song-list" id="favoriteSongs">
+        <div class="empty">No favorite songs yet.</div>
+      </div>
+    </section>
+
+    <!-- ARTISTS -->
+    <section class="page" id="artistsPage">
+      <div class="page-title-row">
+        <h1>Artists</h1>
+      </div>
+      <div class="library-list" id="artistsList">
+        <div class="loading">Loading...</div>
+      </div>
+    </section>
+
+    <!-- ARTIST DETAIL -->
+    <section class="page" id="artistDetailPage">
+      <button class="back-button" data-back="artistsPage">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+        Artists
+      </button>
+      <div id="artistDetail"></div>
+    </section>
+
+    <!-- ALBUMS -->
+    <section class="page" id="albumsPage">
+      <div class="page-title-row">
+        <h1>Albums</h1>
+      </div>
+      <div class="library-list" id="albumsList">
+        <div class="loading">Loading...</div>
+      </div>
+    </section>
+
+    <!-- ALBUM DETAIL -->
+    <section class="page" id="albumDetailPage">
+      <button class="back-button" data-back="albumsPage">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+        Albums
+      </button>
+      <div id="albumDetail"></div>
+    </section>
+
+    <!-- PLAYLISTS -->
+    <section class="page" id="playlistsPage">
+      <div class="page-title-row">
+        <h1>Playlists</h1>
+        <button class="add-button" id="createPlaylistButton">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="library-list" id="playlistsList">
+        <div class="loading">Loading...</div>
+      </div>
+    </section>
+
+    <!-- PLAYLIST DETAIL -->
+    <section class="page" id="playlistDetailPage">
+      <button class="back-button" data-back="playlistsPage">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+        Playlists
+      </button>
+      <div id="playlistDetail"></div>
+    </section>
+
+    <!-- SEARCH RESULTS -->
+    <section class="page" id="searchPage">
+      <div class="page-title-row">
+        <h1>Search</h1>
+      </div>
+      <div class="song-list" id="searchResults">
+        <div class="empty">Search for a song, artist or album.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MINI PLAYER -->
+  <div class="mini-player hidden" id="miniPlayer">
+    <div class="mini-cover" id="miniCover">♪</div>
+    <div class="mini-info" id="miniInfo">
+      <div class="mini-title" id="miniTitle">Nothing playing</div>
+      <div class="mini-artist" id="miniArtist">—</div>
+    </div>
+    <button class="mini-like" id="miniLike">♡</button>
+    <button class="mini-play" id="miniPlay">▶</button>
+  </div>
+
+  <!-- FULL PLAYER -->
+  <div class="player-overlay hidden" id="playerOverlay">
+    <div class="player">
+      <button class="player-close" id="playerClose">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="white">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+      </button>
+      <div class="player-cover" id="playerCover">♪</div>
+      <div class="player-title" id="playerTitle">Nothing playing</div>
+      <div class="player-artist" id="playerArtist">—</div>
+      <input type="range" id="progress" min="0" max="100" value="0">
+      <div class="time-row">
+        <span id="currentTime">0:00</span>
+        <span id="duration">0:00</span>
+      </div>
+      <div class="player-controls">
+        <button id="previousButton">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+          </svg>
+        </button>
+        <button class="main-play" id="mainPlay">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+        <button id="nextButton">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="player-extra">
+        <button id="shuffleButton">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm0.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+          </svg>
+        </button>
+        <button id="playerLike">♡</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE PLAYLIST MODAL -->
+  <div class="modal hidden" id="playlistModal">
+    <div class="modal-card">
+      <h2>Create Playlist</h2>
+      <input id="playlistName" type="text" maxlength="100" placeholder="Playlist name">
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelPlaylist">Cancel</button>
+        <button class="primary-button" id="savePlaylist">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD TO PLAYLIST MODAL -->
+  <div class="modal hidden" id="addToPlaylistModal">
+    <div class="modal-card">
+      <h2>Add to Playlist</h2>
+      <div id="addPlaylistList" class="library-list"></div>
+      <button class="secondary-button full-button" id="closeAddPlaylist">Close</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-page="homePage">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+      </svg>
+      <small>Home</small>
+    </button>
+    <button class="nav-item" data-page="songsPage">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+      </svg>
+      <small>Songs</small>
+    </button>
+    <button class="nav-item" data-page="favoritesPage">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+      </svg>
+      <small>Favorites</small>
+    </button>
+    <button class="nav-item" data-page="artistsPage">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+      </svg>
+      <small>Artists</small>
+    </button>
+    <button class="nav-item" data-page="playlistsPage">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+      </svg>
+      <small>Library</small>
+    </button>
+  </nav>
+
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+
+<script src="app.js"></script>
+
+</body>
+</html>
