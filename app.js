@@ -26,7 +26,11 @@ if (tg) {
    ========================================================= */
 
 const state = {
-   console.log("CURRENT USER ID:", state.userId);
+  const state = {
+  userId:
+    tg?.initDataUnsafe?.user?.id
+      ? String(tg.initDataUnsafe.user.id)
+      : null,
 
   songs: [],
   favorites: [],
