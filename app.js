@@ -1,8 +1,8 @@
 const API =
-  "https://white-playlist-api-new.mahantem2.workers.dev/api/v1";
+  "https://white-playlist-api-cover.mahantem2.workers.dev/";
 
 const AUDIO_API =
-  "https://white-playlist-api-new.mahantem2.workers.dev/api/v1/audio";
+  "https://white-playlist-api-cover.mahantem2.workers.dev/api/v1/audio";
 
 /* =========================================================
    TELEGRAM
