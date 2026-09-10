@@ -68,6 +68,15 @@ svg { display: block; overflow: visible; }
   --accent-glow-soft: rgba(178, 160, 219, .18);
   --danger: #ff5c52;
 
+  /* Player-only glow, tinted per-song from the cover's dominant
+     color (see updatePlayerDynamicColor() in app.js). Defaults to
+     the original lavender-white accent glow above, and is scoped
+     to the player/mini-player only so nothing else in the app
+     (focus rings, the playing-row highlight, home ambient
+     background) is affected by a song's color. */
+  --player-glow: var(--accent-glow);
+  --player-glow-soft: var(--accent-glow-soft);
+
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
@@ -774,13 +783,17 @@ main { width: 100%; }
   pointer-events: none;
   background:
     radial-gradient(circle at 25% 30%, rgba(255,255,255,.10), transparent 45%),
-    radial-gradient(circle at 75% 70%, var(--accent-glow-soft), transparent 42%);
+    radial-gradient(circle at 75% 70%, var(--player-glow-soft), transparent 42%);
   transform: translate3d(0,0,0) scale(1);
   animation: whitePlaylistAmbient 18s ease-in-out infinite alternate;
   will-change: transform;
+  /* Lightweight recolor when the song/cover changes — never
+     animated per-frame, only transitions when the CSS var itself
+     is updated (once per song). */
+  transition: background var(--dur-slow) var(--ease);
 }
 
-body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-glow-soft); }
+body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--player-glow-soft); }
 
 .mini-cover {
   width: 50px; height: 50px;
@@ -838,6 +851,20 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--acc
   background: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 60%, #070707 100%);
   position: relative;
   overflow: hidden;
+  isolation: isolate;
+}
+
+/* Subtle per-song ambient wash behind the whole sheet, same
+   --player-glow-soft var as the cover glow below so both update
+   together. Low opacity, purely decorative. */
+.player::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 20%, var(--player-glow-soft), transparent 60%);
+  transition: background var(--dur-slow) var(--ease);
 }
 
 .player-top-row {
@@ -845,6 +872,8 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--acc
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative;
+  z-index: 2;
 }
 
 .player-close {
@@ -857,24 +886,16 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--acc
 .player-close:active { transform: translateX(-8px) scale(.9); color: #fff; }
 .player-close svg { width: 21px; height: 21px; }
 
-/* LYRICS TOGGLE — sits opposite the close button; purely additive,
-   doesn't touch player-close's layout or behavior. */
-.lyrics-toggle-button {
+.lyrics-toggle {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
   transform: translateX(8px);
   transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
 }
-.lyrics-toggle-button svg {
-  width: 20px; height: 20px;
-  fill: none; stroke: currentColor;
-  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-}
-.lyrics-toggle-button:active { transform: translateX(8px) scale(.9); }
-.lyrics-toggle-button.active { color: var(--np-accent, #fff); }
-.lyrics-toggle-button.no-lyrics { opacity: .45; }
-.lyrics-toggle-button[disabled] { opacity: .35; pointer-events: none; }
+.lyrics-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.lyrics-toggle:active { transform: translateX(8px) scale(.9); }
+.lyrics-toggle.active { color: #fff; }
 
 .player-cover {
   width: min(78vw, 340px);
@@ -897,33 +918,10 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--acc
   inset: -18%;
   z-index: -1;
   border-radius: inherit;
-  background: radial-gradient(circle, var(--np-glow-soft, var(--accent-glow-soft)), transparent 70%);
+  background: radial-gradient(circle, var(--player-glow-soft), transparent 70%);
   opacity: 0;
   transition: opacity var(--dur-slow) var(--ease), background var(--dur-slow) var(--ease);
   pointer-events: none;
-}
-
-/* DYNAMIC COVER COLOR — ambient wash behind the whole sheet, derived
-   from the current cover's dominant color by app.js (--np-glow /
-   --np-glow-soft custom properties, scoped to .player). Falls back to
-   fully transparent (i.e. the original flat dark background) when
-   those variables are unset, so nothing changes until a color is
-   actually extracted. */
-.player::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 12%, var(--np-glow-soft, transparent), transparent 55%);
-  opacity: .9;
-  transition: background var(--dur-slow) var(--ease);
-}
-
-.player-top-row, .player-cover, .lyrics-panel, .player-title-row,
-.player-artist, .waveform-wrap, .time-row, .player-controls {
-  position: relative;
-  z-index: 1;
 }
 
 body.is-playing .player-cover::before { opacity: 1; }
@@ -969,16 +967,18 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   font-size: 14px; line-height: 20px;
 }
 
-/* WAVEFORM — canvas drawn from the real decoded audio (see
-   generateWaveform() in app.js). Sits behind the existing #progress
-   range input, which stays fully functional (drag-to-seek keeps
-   using its original "input" listener) but becomes visually
-   transparent once a real waveform is available; if generation ever
-   fails, the range's original gradient bar shows through untouched. */
-.waveform-wrap {
+/* PROGRESS + WAVEFORM — two separate visual layers sharing one hit
+   area. The waveform canvas (real amplitude bars, drawn by
+   drawWaveform() in app.js) sits behind and is purely visual
+   (pointer-events: none); the original #progress range input sits
+   on top, unchanged functionally, so dragging/tapping anywhere in
+   this area seeks exactly as before. Until a waveform is ready (or
+   if generation fails), #progress falls back to its own solid
+   fill bar so seeking is never blocked on the waveform. */
+.player-progress-wrap {
   position: relative;
   width: 100%;
-  height: 36px;
+  height: 34px;
   margin-top: 26px;
 }
 
@@ -988,39 +988,35 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   width: 100%;
   height: 100%;
   display: block;
+  pointer-events: none;
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
-  pointer-events: none; /* #progress on top stays the interactive layer */
 }
-
-.waveform-wrap.has-waveform .waveform-canvas { opacity: 1; }
-
-.waveform-wrap.has-waveform #progress {
-  opacity: 0;
-}
-
-.waveform-wrap #progress {
-  position: absolute;
-  inset: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-top: 0;
-  transition: opacity var(--dur) var(--ease);
-}
+.waveform-canvas[data-state="ready"] { opacity: 1; }
 
 /* PROGRESS BAR — thumb color unchanged from the original design,
    the --fill custom property (set by app.js, purely visual) paints
    the played portion so position is legible at a glance. */
 #progress {
   --fill: 0%;
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  transform: translateY(-50%);
   width: 100%;
-  height: 6px;
-  margin-top: 30px;
+  height: 34px;
+  margin: 0;
   appearance: none;
   -webkit-appearance: none;
-  border-radius: 20px;
+  background: transparent;
   cursor: pointer;
-  background: linear-gradient(to right, var(--np-accent, #fff) var(--fill), #2b2b2b var(--fill));
+  z-index: 2;
+}
+
+/* Fallback track — only visible while the waveform canvas is empty
+   (loading/unavailable), via the [data-state] flag app.js sets. */
+.waveform-canvas[data-state="ready"] ~ #progress::-webkit-slider-runnable-track { background: transparent; }
+.waveform-canvas:not([data-state="ready"]) ~ #progress::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #fff var(--fill), #2b2b2b var(--fill));
 }
 
 #progress::-webkit-slider-runnable-track {
@@ -1034,15 +1030,15 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   width: 16px; height: 16px;
   margin-top: -5px;
   border-radius: 50%;
-  background: var(--np-accent, #fff);
+  background: #fff;
   box-shadow: 0 0 8px rgba(255, 255, 255, .35);
-  transition: transform var(--dur-fast) var(--ease), background var(--dur-slow) var(--ease);
+  transition: transform var(--dur-fast) var(--ease);
 }
 #progress:active::-webkit-slider-thumb { transform: scale(1.15); }
 
 #progress::-moz-range-track { height: 6px; background: #2b2b2b; border-radius: 20px; }
-#progress::-moz-range-progress { height: 6px; background: var(--np-accent, #fff); border-radius: 20px; }
-#progress::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: var(--np-accent, #fff); }
+#progress::-moz-range-progress { height: 6px; background: #fff; border-radius: 20px; }
+#progress::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: #fff; }
 
 .time-row {
   width: 100%;
@@ -1099,67 +1095,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-controls .main-play:active { transform: scale(.94); }
 .player-controls .main-play svg { width: 32px !important; height: 32px !important; fill: #000; stroke: none; }
 
-/* SYNCED LYRICS PANEL — replaces the cover area (same slot/size)
-   when toggled on via #lyricsToggle. Independent of the waveform and
-   color-extraction features; if no timestamped lyrics are available
-   it just shows the "Lyrics unavailable" empty state. */
-.lyrics-panel {
-  width: min(78vw, 340px);
-  aspect-ratio: 1;
-  margin: 0 auto 28px;
-  border-radius: var(--radius-xl);
-  background: #111;
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-
-.lyrics-scroll {
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 22px 18px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.lyrics-scroll::-webkit-scrollbar { display: none; }
-
-.lyrics-empty {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 14px;
-  padding: 0 10px;
-}
-
-.lyrics-line {
-  padding: 8px 4px;
-  text-align: center;
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 600;
-  color: var(--text-muted);
-  transition: color var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease), opacity var(--dur-slow) var(--ease);
-  cursor: pointer;
-  opacity: .55;
-  transform: scale(.96);
-}
-
-.lyrics-line:active { opacity: .85; }
-
-.lyrics-line.active {
-  color: var(--np-accent, #fff);
-  opacity: 1;
-  transform: scale(1.04);
-}
-
-.lyrics-word {
-  transition: color var(--dur) var(--ease);
-}
-.lyrics-word.sung { color: var(--np-accent, #fff); }
-
 #shuffleButton, #previousButton, #nextButton, #playerLike { color: #fff; }
 
 #shuffleButton { color: #777 !important; }
@@ -1192,6 +1127,92 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-close:active, .song-actions button:active, .player-controls button:active {
   transform: scale(.96);
 }
+
+/* LYRICS PANEL — slides over the full player content; the mini
+   player, progress bar and playback controls underneath keep
+   working exactly as before (the panel is purely an overlay, it
+   never unmounts or replaces any player markup). */
+.lyrics-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  padding: calc(20px + env(safe-area-inset-top)) 20px calc(25px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #101010 0%, #0a0a0a 60%, #070707 100%);
+  border-radius: 28px 28px 0 0;
+  transform: translateY(0);
+  opacity: 1;
+  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease);
+}
+
+.lyrics-panel.hidden {
+  opacity: 0;
+  transform: translateY(16px);
+  pointer-events: none;
+}
+
+.lyrics-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.lyrics-close {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: #888;
+  transition: color var(--dur) var(--ease);
+}
+.lyrics-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.lyrics-close:active { color: #fff; }
+
+.lyrics-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 18px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  mask-image: linear-gradient(180deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+.lyrics-body::-webkit-scrollbar { display: none; }
+
+.lyrics-status {
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 12px;
+}
+
+.lyrics-line {
+  padding: 10px 4px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: center;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.lyrics-line:active { transform: scale(.98); }
+
+.lyrics-line.active {
+  color: #fff;
+  transform: scale(1.02);
+}
+
+/* Karaoke word-level highlight (only rendered when LRCLIB provides
+   word timestamps — see parseLRC() in app.js). Plain line-level
+   lyrics never get this markup. Upcoming words in the active line
+   sit dim; each word brightens the instant it's sung. */
+.lyrics-word { transition: color var(--dur-fast) linear; }
+.lyrics-line.active .lyrics-word { color: rgba(255, 255, 255, .4); }
+.lyrics-line.active .lyrics-word.sung { color: #fff; }
 
 /* ---------- 8. MODALS & BOTTOM SHEETS ---------- */
 .modal {

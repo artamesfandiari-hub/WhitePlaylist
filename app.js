@@ -2303,6 +2303,11 @@ function setupPlayer() {
       audio.currentTime =
         (Number(event.target.value) / 100) *
         audio.duration;
+
+      // Visual-only: repaint the already-cached waveform bars to
+      // reflect the new position while scrubbing. Does not touch
+      // audio playback or trigger any re-fetch/re-decode.
+      redrawWaveformProgress();
     });
 
   audio.addEventListener("play", () => {
@@ -2319,10 +2324,11 @@ function setupPlayer() {
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
 
-  // New, additive setup for the waveform + lyrics UI. Fully
-  // independent of everything above.
-  setupWaveformInteraction();
-  setupLyricsToggle();
+  // Waveform canvas is sized off its own rendered box, so it needs a
+  // repaint (not a recompute) whenever the layout changes.
+  window.addEventListener("resize", redrawWaveformProgress);
+
+  setupLyrics();
 }
 
 // contextList is the list the song was selected from (e.g. the
@@ -2536,11 +2542,16 @@ function updatePlayerUI() {
   updatePlayButtons();
   highlightPlayingRow();
 
-  // New, additive features — each is fully independent and safely
-  // no-ops/falls back on its own if it fails (see each function).
-  generateWaveform(song);
-  applyCoverColor(song);
-  loadLyrics(song);
+  // Each call below is internally deduped/cached per song, so it's
+  // safe that updatePlayerUI() runs both on a brand-new song and on
+  // a plain resume — none of these re-fetch or re-decode anything
+  // that's already cached for this song.
+  updatePlayerDynamicColor(song);
+  loadWaveform(song);
+
+  if (lyricsPanelOpen) {
+    loadLyrics(song);
+  }
 }
 
 function updatePlayerLike() {
@@ -2610,13 +2621,17 @@ function highlightPlayingRow() {
 function openFullPlayer() {
   playerOverlay.classList.remove("hidden");
 
-  // Canvas needs real layout dimensions to draw crisply; the wrap is
-  // 0-width while the overlay is hidden, so (re)size once it's visible.
-  resizeWaveformCanvas();
+  // The waveform canvas has zero size while the overlay is
+  // display:none, so any draw that happened while it was closed was
+  // a no-op — repaint now that it's actually laid out. Peaks are
+  // already cached (or being generated) via loadWaveform(), so this
+  // never re-fetches or re-decodes anything.
+  redrawWaveformProgress();
 }
 
 function closeFullPlayer() {
   playerOverlay.classList.add("hidden");
+  closeLyricsPanel();
 }
 
 // Visual-only: paints the portion of the track already played.
@@ -2638,10 +2653,12 @@ function updateProgress() {
   document.getElementById("currentTime").textContent =
     formatTime(audio.currentTime);
 
-  // Additive hooks for the new features below — both are no-ops
-  // until a waveform/lyrics set has actually loaded for this song.
-  drawWaveformProgress(audio.currentTime / audio.duration);
-  syncLyrics(audio.currentTime);
+  // Both of these are cheap, cache-only repaints (no network, no
+  // decoding, no recomputation) — they just reflect the currentTime
+  // that this same "timeupdate" tick already gave us. Reusing this
+  // existing listener instead of adding new "timeupdate" listeners.
+  redrawWaveformProgress();
+  updateLyricsSync();
 }
 
 function updateDuration() {
@@ -2663,6 +2680,762 @@ function formatTime(seconds) {
     ":" +
     String(remaining).padStart(2, "0")
   );
+}
+
+/* =========================================================
+   WAVEFORM
+   ----------------------------------------------------------------
+   Real amplitude bars decoded from the actual MP3 via the Web
+   Audio API — never randomly generated. Fully decoupled from
+   playback: it runs off a separate fetch() of the same audio URL
+   (never touches audio.src / audio.play()), is generated
+   asynchronously, and is cached per song (in-memory for this
+   session, localStorage across sessions) so the same song is only
+   ever downloaded/decoded once.
+   ========================================================= */
+
+const WAVEFORM_BAR_COUNT = 64;
+
+// song.id -> Array<number> peaks (0..1), in-memory for this session
+const waveformCache = new Map();
+
+// Bumped on every loadWaveform() call so a slow decode for a song
+// the user has since skipped past can never overwrite the bars for
+// whatever song is actually playing now.
+let waveformRequestToken = 0;
+
+// Lazily created on first use (always inside a user-gesture-derived
+// call path, e.g. playSong()/togglePlay()), and reused for every
+// song afterward — never a second AudioContext.
+let waveformAudioCtx = null;
+
+let lastWaveformPeaks = null;
+
+function waveformStorageKey(songId) {
+  return `wp_wave_${songId}`;
+}
+
+function loadWaveformFromStorage(songId) {
+  try {
+    const raw = localStorage.getItem(waveformStorageKey(songId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.map(v => v / 100)
+      : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Stores peaks compactly (0-100 ints) and keeps a small LRU index so
+// this never grows unbounded across many different songs.
+function saveWaveformToStorage(songId, peaks) {
+  try {
+    const compact = peaks.map(v => Math.round(v * 100));
+    localStorage.setItem(
+      waveformStorageKey(songId),
+      JSON.stringify(compact)
+    );
+
+    const indexRaw = localStorage.getItem("wp_wave_index");
+    const index = indexRaw ? JSON.parse(indexRaw) : [];
+    const next = index.filter(id => id !== songId);
+    next.push(songId);
+
+    while (next.length > 40) {
+      const evictId = next.shift();
+      localStorage.removeItem(waveformStorageKey(evictId));
+    }
+
+    localStorage.setItem("wp_wave_index", JSON.stringify(next));
+  } catch (_) {
+    // Storage full/unavailable/private-mode — the waveform simply
+    // won't persist across sessions. Playback and the in-memory
+    // cache for the current session are unaffected either way.
+  }
+}
+
+function setWaveformState(stateName) {
+  const canvas = document.getElementById("waveformCanvas");
+  if (canvas) canvas.dataset.state = stateName;
+}
+
+// Generates (or retrieves already-cached) amplitude peaks for
+// `song`, then draws them. This is the only entry point that ever
+// fetches/decodes the MP3 for waveform purposes, and it always
+// checks the cache first — a song already played once this session
+// (or on a previous visit, via localStorage) never triggers a
+// second fetch or decode.
+function loadWaveform(song) {
+  if (!song || song.id == null) return;
+
+  const token = ++waveformRequestToken;
+
+  const memCached = waveformCache.get(song.id);
+  if (memCached) {
+    drawWaveform(memCached);
+    setWaveformState("ready");
+    return;
+  }
+
+  const stored = loadWaveformFromStorage(song.id);
+  if (stored && stored.length) {
+    waveformCache.set(song.id, stored);
+    drawWaveform(stored);
+    setWaveformState("ready");
+    return;
+  }
+
+  setWaveformState("loading");
+  drawWaveform(null); // clear any previous song's bars immediately
+
+  const audioUrl =
+    `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+
+  // fetchPriority "low" (where supported) so this never competes
+  // with the <audio> element's own request for bandwidth on the
+  // song that's actually about to play.
+  fetch(audioUrl, { priority: "low" })
+    .then(res => {
+      if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
+      return res.arrayBuffer();
+    })
+    .then(buffer => {
+      if (token !== waveformRequestToken) return null; // superseded
+
+      if (!waveformAudioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) throw new Error("Web Audio API unsupported");
+        waveformAudioCtx = new Ctx();
+      }
+
+      return waveformAudioCtx.decodeAudioData(buffer);
+    })
+    .then(audioBuffer => {
+      if (!audioBuffer || token !== waveformRequestToken) return;
+
+      const peaks = computeWaveformPeaks(audioBuffer, WAVEFORM_BAR_COUNT);
+
+      waveformCache.set(song.id, peaks);
+      saveWaveformToStorage(song.id, peaks);
+
+      if (token === waveformRequestToken) {
+        drawWaveform(peaks);
+        setWaveformState("ready");
+      }
+    })
+    .catch(error => {
+      console.error("Waveform:", error);
+      if (token === waveformRequestToken) {
+        setWaveformState("unavailable");
+      }
+    });
+}
+
+// Downsamples channel 0 into `barCount` peak values (0..1) using the
+// max sample magnitude per bucket — this is what gives a waveform
+// its real jagged look, unlike an averaged/smoothed curve.
+function computeWaveformPeaks(audioBuffer, barCount) {
+  const channel = audioBuffer.getChannelData(0);
+  const samplesPerBar = Math.max(1, Math.floor(channel.length / barCount));
+  const peaks = new Array(barCount).fill(0);
+
+  for (let bar = 0; bar < barCount; bar++) {
+    const start = bar * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, channel.length);
+
+    let max = 0;
+    for (let i = start; i < end; i++) {
+      const v = Math.abs(channel[i]);
+      if (v > max) max = v;
+    }
+
+    peaks[bar] = max;
+  }
+
+  const loudest = Math.max(...peaks, 0.0001);
+  return peaks.map(v => Math.min(1, v / loudest));
+}
+
+// Paints the bars. Cheap enough to call on every timeupdate tick —
+// it never recomputes peaks, only repaints already-known numbers.
+function drawWaveform(peaks) {
+  lastWaveformPeaks = peaks;
+
+  const canvas = document.getElementById("waveformCanvas");
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(rect.width * dpr));
+  const height = Math.max(1, Math.round(rect.height * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!peaks || !peaks.length) return;
+
+  const percent =
+    audio.duration
+      ? (audio.currentTime / audio.duration) * 100
+      : 0;
+
+  const barCount = peaks.length;
+  const gap = 2 * dpr;
+  const barWidth =
+    Math.max(1, (canvas.width - gap * (barCount - 1)) / barCount);
+  const activeBars = Math.round((percent / 100) * barCount);
+  const midY = canvas.height / 2;
+
+  for (let i = 0; i < barCount; i++) {
+    const amp = Math.max(0.06, peaks[i]);
+    const barHeight = amp * canvas.height;
+    const x = i * (barWidth + gap);
+
+    ctx.fillStyle =
+      i < activeBars
+        ? "rgba(255,255,255,.92)"
+        : "rgba(255,255,255,.24)";
+
+    ctx.fillRect(x, midY - barHeight / 2, barWidth, barHeight);
+  }
+}
+
+// Called from the existing "timeupdate"/"input" handling — no new
+// listeners. Purely a repaint of already-cached peaks.
+function redrawWaveformProgress() {
+  if (lastWaveformPeaks) {
+    drawWaveform(lastWaveformPeaks);
+  }
+}
+
+/* =========================================================
+   DYNAMIC PLAYER COLORS
+   ----------------------------------------------------------------
+   Extracts a dominant color from the current song's cover and uses
+   it only for the player's ambient glow (--player-glow /
+   --player-glow-soft — see style.css), never for --accent, so
+   text/icon contrast is untouched. Runs once per song/cover change
+   only — never on timeupdate — and is cached per song.
+   ========================================================= */
+
+// song.id -> { glow, glowSoft }
+const playerGlowCache = new Map();
+let lastGlowCoverUrl = undefined;
+
+function updatePlayerDynamicColor(song) {
+  if (!song) return;
+
+  const coverUrl = song.cover_url || null;
+
+  if (coverUrl === lastGlowCoverUrl) return; // nothing changed
+  lastGlowCoverUrl = coverUrl;
+
+  if (!coverUrl) {
+    resetPlayerGlow();
+    return;
+  }
+
+  const cached = playerGlowCache.get(song.id);
+  if (cached) {
+    applyPlayerGlow(cached);
+    return;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+
+  img.onload = () => {
+    // If the player has since moved to a different cover, this
+    // result is stale — drop it rather than flash the wrong color.
+    if (lastGlowCoverUrl !== coverUrl) return;
+
+    try {
+      const glow = extractDominantColor(img);
+      playerGlowCache.set(song.id, glow);
+      applyPlayerGlow(glow);
+    } catch (error) {
+      console.error("Dynamic color:", error);
+    }
+  };
+
+  img.onerror = () => {
+    // Cover failed to load for color purposes — leave the default
+    // glow in place, exactly as if no cover_url existed.
+  };
+
+  img.src = coverUrl;
+}
+
+// Samples a small downscaled copy of the cover and buckets pixels
+// into coarse RGB bins, picking the most common bin (a real
+// "dominant color" pass rather than a flat average, so a high-
+// contrast cover doesn't just wash out to gray).
+function extractDominantColor(img) {
+  const size = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, size, size);
+
+  const { data } = ctx.getImageData(0, 0, size, size);
+
+  const buckets = new Map();
+  let sumR = 0, sumG = 0, sumB = 0, counted = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue; // skip transparent pixels
+
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+
+    // Skip near-black/near-white pixels — they rarely represent a
+    // song's "color" and would otherwise dominate the bucket count
+    // on covers with large dark or light backgrounds.
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max < 30 || min > 225) continue;
+
+    const key = `${r >> 5}-${g >> 5}-${b >> 5}`;
+    const entry = buckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+    entry.r += r; entry.g += g; entry.b += b; entry.count++;
+    buckets.set(key, entry);
+
+    sumR += r; sumG += g; sumB += b; counted++;
+  }
+
+  let best = null;
+  for (const entry of buckets.values()) {
+    if (!best || entry.count > best.count) best = entry;
+  }
+
+  let r, g, b;
+  if (best) {
+    r = Math.round(best.r / best.count);
+    g = Math.round(best.g / best.count);
+    b = Math.round(best.b / best.count);
+  } else if (counted) {
+    r = Math.round(sumR / counted);
+    g = Math.round(sumG / counted);
+    b = Math.round(sumB / counted);
+  } else {
+    // Cover was effectively all near-black/near-white — fall back
+    // to the app's original lavender-white accent tone.
+    r = 178; g = 160; b = 219;
+  }
+
+  return {
+    glow: `rgba(${r}, ${g}, ${b}, .55)`,
+    glowSoft: `rgba(${r}, ${g}, ${b}, .18)`
+  };
+}
+
+function applyPlayerGlow(colorPair) {
+  document.documentElement.style.setProperty("--player-glow", colorPair.glow);
+  document.documentElement.style.setProperty("--player-glow-soft", colorPair.glowSoft);
+}
+
+function resetPlayerGlow() {
+  document.documentElement.style.removeProperty("--player-glow");
+  document.documentElement.style.removeProperty("--player-glow-soft");
+}
+
+/* =========================================================
+   LYRICS
+   ----------------------------------------------------------------
+   Real, timestamped lyrics from LRCLIB (free, no API key, CORS-
+   open) matched by artist + track title. Never invents lyrics or
+   timestamps: a track with no synced-lyrics match is shown as
+   clearly unavailable rather than guessed.
+   ========================================================= */
+
+const LYRICS_API = "https://lrclib.net/api";
+
+// song.id -> { lines, unavailable, instrumental? }
+const lyricsCache = new Map();
+
+let lyricsRequestToken = 0;
+let lyricsPanelOpen = false;
+let activeLyricsLineIndex = -1;
+
+function setupLyrics() {
+  document
+    .getElementById("lyricsButton")
+    .addEventListener("click", toggleLyricsPanel);
+
+  document
+    .getElementById("lyricsClose")
+    .addEventListener("click", closeLyricsPanel);
+}
+
+function toggleLyricsPanel() {
+  if (lyricsPanelOpen) {
+    closeLyricsPanel();
+  } else {
+    openLyricsPanel();
+  }
+}
+
+function openLyricsPanel() {
+  if (!state.currentSong) return;
+
+  lyricsPanelOpen = true;
+
+  const panel = document.getElementById("lyricsPanel");
+  const button = document.getElementById("lyricsButton");
+
+  if (panel) panel.classList.remove("hidden");
+  if (button) {
+    button.classList.add("active");
+    button.setAttribute("aria-pressed", "true");
+  }
+
+  loadLyrics(state.currentSong);
+}
+
+function closeLyricsPanel() {
+  lyricsPanelOpen = false;
+
+  const panel = document.getElementById("lyricsPanel");
+  const button = document.getElementById("lyricsButton");
+
+  if (panel) panel.classList.add("hidden");
+  if (button) {
+    button.classList.remove("active");
+    button.setAttribute("aria-pressed", "false");
+  }
+}
+
+function lyricsStorageKey(songId) {
+  return `wp_lrc_${songId}`;
+}
+
+// Mirrors saveWaveformToStorage()'s small LRU index so lyrics text
+// (a few KB per song) doesn't grow localStorage unbounded either.
+function saveLyricsToStorage(songId, result) {
+  try {
+    localStorage.setItem(
+      lyricsStorageKey(songId),
+      JSON.stringify(result)
+    );
+
+    const indexRaw = localStorage.getItem("wp_lrc_index");
+    const index = indexRaw ? JSON.parse(indexRaw) : [];
+    const next = index.filter(id => id !== songId);
+    next.push(songId);
+
+    while (next.length > 40) {
+      const evictId = next.shift();
+      localStorage.removeItem(lyricsStorageKey(evictId));
+    }
+
+    localStorage.setItem("wp_lrc_index", JSON.stringify(next));
+  } catch (_) {
+    // Storage full/unavailable — lyrics just won't persist across
+    // sessions; the in-memory cache for this session is unaffected.
+  }
+}
+
+// Fetches (or retrieves cached) lyrics for `song` and renders them.
+// Only ever called when the lyrics panel is open for this song, so
+// no lyrics API calls happen while the panel is closed.
+function loadLyrics(song) {
+  if (!song || song.id == null) return;
+
+  const token = ++lyricsRequestToken;
+  const body = document.getElementById("lyricsBody");
+  if (!body) return;
+
+  const cached = lyricsCache.get(song.id);
+  if (cached) {
+    renderLyrics(cached);
+    return;
+  }
+
+  let stored = null;
+  try {
+    const raw = localStorage.getItem(lyricsStorageKey(song.id));
+    stored = raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    stored = null;
+  }
+
+  if (stored) {
+    lyricsCache.set(song.id, stored);
+    renderLyrics(stored);
+    return;
+  }
+
+  body.innerHTML = `<div class="lyrics-status">Loading lyrics…</div>`;
+
+  fetchLyricsFromLRCLIB(song)
+    .then(result => {
+      if (token !== lyricsRequestToken) return; // song/panel changed meanwhile
+
+      lyricsCache.set(song.id, result);
+      saveLyricsToStorage(song.id, result);
+
+      renderLyrics(result);
+    })
+    .catch(error => {
+      console.error("Lyrics:", error);
+      if (token !== lyricsRequestToken) return;
+
+      const result = { lines: [], unavailable: true };
+      lyricsCache.set(song.id, result);
+      renderLyrics(result);
+    });
+}
+
+// Queries LRCLIB by artist + track title (and duration, when known,
+// to disambiguate covers/remixes). Tries the exact-match endpoint
+// first, then falls back to search and picks the closest duration
+// match. Never fabricates a result — any failure/empty response
+// resolves to { lines: [], unavailable: true }.
+async function fetchLyricsFromLRCLIB(song) {
+  const title = (song.title || "").trim();
+  const artist = (song.artist || "").trim();
+
+  if (!title || !artist) {
+    return { lines: [], unavailable: true };
+  }
+
+  const getParams = new URLSearchParams({
+    track_name: title,
+    artist_name: artist
+  });
+
+  if (song.duration) {
+    getParams.set("duration", String(Math.round(song.duration)));
+  }
+
+  try {
+    const res = await fetch(`${LYRICS_API}/get?${getParams.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      const parsed = parseLyricsResponse(data);
+      if (parsed) return parsed;
+    }
+  } catch (_) {
+    // fall through to search
+  }
+
+  try {
+    const searchParams = new URLSearchParams({
+      track_name: title,
+      artist_name: artist
+    });
+
+    const res = await fetch(`${LYRICS_API}/search?${searchParams.toString()}`);
+    if (!res.ok) return { lines: [], unavailable: true };
+
+    const results = await res.json();
+    if (!Array.isArray(results) || !results.length) {
+      return { lines: [], unavailable: true };
+    }
+
+    const withSync = results.filter(r => r.syncedLyrics);
+    const candidates = withSync.length ? withSync : results;
+
+    let best = candidates[0];
+    if (song.duration) {
+      let bestDiff = Infinity;
+      for (const candidate of candidates) {
+        const diff = Math.abs((candidate.duration || 0) - song.duration);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = candidate;
+        }
+      }
+    }
+
+    return parseLyricsResponse(best) || { lines: [], unavailable: true };
+  } catch (_) {
+    return { lines: [], unavailable: true };
+  }
+}
+
+// Turns one LRCLIB record into { lines, unavailable, instrumental? }.
+// Plain-only lyrics (no syncedLyrics) are treated as unavailable for
+// sync purposes rather than displayed with guessed timestamps.
+function parseLyricsResponse(data) {
+  if (!data) return null;
+
+  if (data.instrumental) {
+    return { lines: [], unavailable: true, instrumental: true };
+  }
+
+  if (!data.syncedLyrics) return null;
+
+  const lines = parseLRC(data.syncedLyrics);
+  if (!lines.length) return null;
+
+  return { lines, unavailable: false };
+}
+
+// Parses standard/enhanced LRC text into an ordered array of
+// { time, text, words } — words is null unless the source actually
+// included per-word <mm:ss.xx> tags (karaoke-style), so word
+// highlighting only ever appears where real word timing exists.
+function parseLRC(lrcText) {
+  const lines = [];
+  const rawLines = lrcText.split("\n");
+
+  const lineTimeRe = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+  const wordTimeRe = /<(\d+):(\d+(?:\.\d+)?)>/g;
+
+  for (const rawLine of rawLines) {
+    const timestamps = [...rawLine.matchAll(lineTimeRe)];
+    if (!timestamps.length) continue;
+
+    let content = rawLine.replace(lineTimeRe, "").trim();
+
+    let words = null;
+    wordTimeRe.lastIndex = 0;
+    if (wordTimeRe.test(content)) {
+      wordTimeRe.lastIndex = 0;
+      words = [];
+
+      const parts = content.split(wordTimeRe);
+      // parts alternates: [textBefore, min, sec, textBefore, min, sec, ...]
+      for (let i = 1; i < parts.length; i += 3) {
+        const min = Number(parts[i]);
+        const sec = Number(parts[i + 1]);
+        const text = (parts[i + 2] || "").trim();
+        if (text) {
+          words.push({ time: min * 60 + sec, text });
+        }
+      }
+
+      content = content.replace(wordTimeRe, "").trim();
+    }
+
+    for (const match of timestamps) {
+      const min = Number(match[1]);
+      const sec = Number(match[2]);
+      lines.push({
+        time: min * 60 + sec,
+        text: content,
+        words
+      });
+    }
+  }
+
+  lines.sort((a, b) => a.time - b.time);
+  return lines;
+}
+
+function renderLyrics(result) {
+  const body = document.getElementById("lyricsBody");
+  if (!body) return;
+
+  activeLyricsLineIndex = -1;
+
+  if (!result || result.unavailable || !result.lines.length) {
+    body.innerHTML = `
+      <div class="lyrics-status">
+        ${
+          result && result.instrumental
+            ? "This track is instrumental."
+            : "Lyrics unavailable for this track."
+        }
+      </div>
+    `;
+    return;
+  }
+
+  body.innerHTML = result.lines
+    .map((line, index) => `
+      <div class="lyrics-line" data-index="${index}" data-time="${line.time}">
+        ${
+          line.words
+            ? line.words
+                .map(w =>
+                  `<span class="lyrics-word" data-time="${w.time}">${escapeHTML(w.text)} </span>`
+                )
+                .join("")
+            : escapeHTML(line.text || "\u00A0")
+        }
+      </div>
+    `)
+    .join("");
+
+  // Tapping a line seeks to it, same as dragging the progress bar —
+  // it only sets audio.currentTime, it never starts/stops playback.
+  body.querySelectorAll(".lyrics-line").forEach(el => {
+    el.addEventListener("click", () => {
+      const time = Number(el.dataset.time);
+      if (Number.isFinite(time) && audio.duration) {
+        audio.currentTime = Math.min(time, audio.duration);
+        updateProgress();
+      }
+    });
+  });
+}
+
+// Called from updateProgress() (the existing "timeupdate" handler) —
+// this does not add a new listener. No-ops immediately whenever the
+// panel is closed or this song has no synced lyrics loaded, so it
+// costs nothing on the common path.
+function updateLyricsSync() {
+  if (!lyricsPanelOpen || !state.currentSong) return;
+
+  const cached = lyricsCache.get(state.currentSong.id);
+  if (!cached || cached.unavailable || !cached.lines.length) return;
+
+  const t = audio.currentTime;
+  const lines = cached.lines;
+
+  let index = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].time <= t) {
+      index = i;
+    } else {
+      break;
+    }
+  }
+
+  const body = document.getElementById("lyricsBody");
+
+  if (index !== activeLyricsLineIndex) {
+    activeLyricsLineIndex = index;
+
+    if (body) {
+      body
+        .querySelectorAll(".lyrics-line.active")
+        .forEach(el => el.classList.remove("active"));
+
+      if (index >= 0) {
+        const el = body.querySelector(`.lyrics-line[data-index="${index}"]`);
+        if (el) {
+          el.classList.add("active");
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      }
+    }
+  }
+
+  // Karaoke word-level highlight within the active line, only when
+  // this line actually has real word timestamps.
+  if (body && index >= 0 && lines[index].words) {
+    const el = body.querySelector(`.lyrics-line[data-index="${index}"]`);
+    if (el) {
+      el.querySelectorAll(".lyrics-word").forEach(wordEl => {
+        const wt = Number(wordEl.dataset.time);
+        wordEl.classList.toggle("sung", Number.isFinite(wt) && wt <= t);
+      });
+    }
+  }
 }
 
 /* =========================================================
@@ -2835,728 +3608,4 @@ function restorePlayerCoverPlaceholder() {
   }
 }
 
-/* =========================================================
-   REAL AUDIO WAVEFORM
-   ---------------------------------------------------------
-   Decodes the actual song file in-browser (Web Audio API) into a
-   small set of peak values and draws them on a canvas that sits on
-   top of the existing #progress range input. #progress itself is
-   completely untouched functionally — dragging it still fires its
-   original "input" listener — it just becomes visually transparent
-   once real peaks are available. If decoding ever fails (unsupported
-   browser, network error, CORS hiccup) the canvas simply never gets
-   the "has-waveform" class and the original gradient bar is what the
-   user sees, exactly as before this feature existed.
-   ========================================================= */
-
-const WAVEFORM_BAR_COUNT = 110;
-
-const waveform = {
-  peaks: null,
-  ready: false,
-  songId: null,
-  token: 0
-};
-
-let waveformAudioCtx = null;
-let waveformCanvasSize = { width: 0, height: 0, dpr: 1 };
-
-function getAudioContextClass() {
-  return window.AudioContext || window.webkitAudioContext || null;
-}
-
-function decodeAudioBuffer(ctx, arrayBuffer) {
-  return new Promise((resolve, reject) => {
-    // decodeAudioData supports both the modern Promise-based form and
-    // the legacy callback form (older Safari); this covers both.
-    const maybePromise =
-      ctx.decodeAudioData(arrayBuffer, resolve, reject);
-
-    if (maybePromise && typeof maybePromise.then === "function") {
-      maybePromise.then(resolve, reject);
-    }
-  });
-}
-
-function computePeaks(audioBuffer, bucketCount) {
-  const channelData = audioBuffer.getChannelData(0);
-  const blockSize =
-    Math.max(1, Math.floor(channelData.length / bucketCount));
-
-  const peaks = new Float32Array(bucketCount);
-
-  for (let i = 0; i < bucketCount; i++) {
-    const start = i * blockSize;
-    const end = Math.min(channelData.length, start + blockSize);
-
-    let max = 0;
-    for (let j = start; j < end; j++) {
-      const value = Math.abs(channelData[j]);
-      if (value > max) max = value;
-    }
-
-    peaks[i] = max;
-  }
-
-  let maxPeak = 0;
-  for (let i = 0; i < peaks.length; i++) {
-    if (peaks[i] > maxPeak) maxPeak = peaks[i];
-  }
-
-  if (maxPeak > 0) {
-    for (let i = 0; i < peaks.length; i++) {
-      peaks[i] = peaks[i] / maxPeak;
-    }
-  }
-
-  return peaks;
-}
-
-async function generateWaveform(song) {
-  const token = ++waveform.token;
-
-  waveform.ready = false;
-  waveform.peaks = null;
-  waveform.songId = song.id;
-
-  const wrap = document.getElementById("waveformWrap");
-  if (wrap) wrap.classList.remove("has-waveform");
-
-  const AudioContextClass = getAudioContextClass();
-  if (!AudioContextClass) return; // Unsupported browser: silent fallback.
-
-  try {
-    const src =
-      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
-
-    const response = await fetch(src);
-    if (!response.ok) throw new Error("Audio fetch failed for waveform");
-
-    const arrayBuffer = await response.arrayBuffer();
-    if (token !== waveform.token) return; // Superseded by a newer song.
-
-    if (!waveformAudioCtx) {
-      waveformAudioCtx = new AudioContextClass();
-    }
-
-    const audioBuffer =
-      await decodeAudioBuffer(waveformAudioCtx, arrayBuffer);
-
-    if (token !== waveform.token) return; // Superseded while decoding.
-
-    waveform.peaks = computePeaks(audioBuffer, WAVEFORM_BAR_COUNT);
-    waveform.ready = true;
-
-    resizeWaveformCanvas();
-
-    if (wrap) wrap.classList.add("has-waveform");
-
-    const ratio =
-      audio.duration ? audio.currentTime / audio.duration : 0;
-
-    drawWaveformBars(ratio);
-  } catch (error) {
-    console.error("Waveform generation:", error);
-    waveform.peaks = null;
-    waveform.ready = false;
-    // wrap keeps "has-waveform" removed above, so #progress's
-    // original gradient bar remains visible — safe fallback.
-  }
-}
-
-function resizeWaveformCanvas() {
-  const canvas = document.getElementById("waveformCanvas");
-  const wrap = document.getElementById("waveformWrap");
-  if (!canvas || !wrap) return;
-
-  const rect = wrap.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
-
-  waveformCanvasSize = { width: rect.width, height: rect.height, dpr };
-
-  const ratio =
-    audio.duration ? audio.currentTime / audio.duration : 0;
-
-  drawWaveformBars(ratio);
-}
-
-function roundedBarPath(ctx, x, y, w, h, r) {
-  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
-
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-}
-
-function drawWaveformBars(progressRatio) {
-  if (!waveform.ready || !waveform.peaks) return;
-
-  const canvas = document.getElementById("waveformCanvas");
-  if (!canvas) return;
-
-  const { width, height, dpr } = waveformCanvasSize;
-  if (!width || !height) return;
-
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
-  const peaks = waveform.peaks;
-  const barCount = peaks.length;
-  const gap = 2;
-  const barWidth =
-    Math.max(1.5, (width - gap * (barCount - 1)) / barCount);
-
-  const ratio =
-    Number.isFinite(progressRatio) ? progressRatio : 0;
-
-  const activeIndex = Math.floor(ratio * barCount);
-  const mutedColor = "rgba(255, 255, 255, .22)";
-
-  for (let i = 0; i < barCount; i++) {
-    const barHeight = Math.max(2, peaks[i] * (height - 4));
-    const x = i * (barWidth + gap);
-    const y = (height - barHeight) / 2;
-
-    ctx.fillStyle = i <= activeIndex ? currentAccentCSS : mutedColor;
-    roundedBarPath(ctx, x, y, barWidth, barHeight, barWidth / 2);
-    ctx.fill();
-  }
-}
-
-// Cheap per-frame call from updateProgress()'s existing timeupdate
-// hook — just repaints with the new progress ratio using the peaks
-// already computed above; does nothing until a waveform is ready.
-function drawWaveformProgress(ratio) {
-  if (!waveform.ready) return;
-  drawWaveformBars(ratio);
-}
-
-function seekWaveformFromClientX(clientX) {
-  const wrap = document.getElementById("waveformWrap");
-  if (!wrap || !audio.duration) return;
-
-  const rect = wrap.getBoundingClientRect();
-  const ratio =
-    Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-
-  audio.currentTime = ratio * audio.duration;
-
-  const percent = ratio * 100;
-  const progressInput = document.getElementById("progress");
-  if (progressInput) progressInput.value = percent;
-
-  setProgressFill(percent);
-  drawWaveformBars(ratio);
-}
-
-function setupWaveformInteraction() {
-  const wrap = document.getElementById("waveformWrap");
-  if (!wrap) return;
-
-  wrap.addEventListener("click", event => {
-    seekWaveformFromClientX(event.clientX);
-  });
-
-  wrap.addEventListener("touchstart", event => {
-    const touch = event.touches[0];
-    if (touch) seekWaveformFromClientX(touch.clientX);
-  }, { passive: true });
-
-  window.addEventListener("resize", () => {
-    if (!playerOverlay.classList.contains("hidden")) {
-      resizeWaveformCanvas();
-    }
-  });
-}
-
-/* =========================================================
-   DYNAMIC COVER COLOR
-   ---------------------------------------------------------
-   Samples the current song's cover art on an offscreen canvas to
-   find a representative color, then smoothly animates a small set of
-   CSS custom properties (--np-accent / --np-glow / --np-glow-soft)
-   scoped to the .player element only — the rest of the app's dark
-   theme is entirely untouched. If extraction fails or there's no
-   cover, it animates back to a neutral tone that matches the
-   existing design's original lavender-white glow.
-   ========================================================= */
-
-const DEFAULT_NP_COLOR = { r: 178, g: 160, b: 219 };
-
-let currentNpColor = { ...DEFAULT_NP_COLOR };
-let currentAccentCSS = "#ffffff";
-let coverColorToken = 0;
-let coverColorAnimationFrame = null;
-
-function extractDominantColor(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-
-    img.onload = () => {
-      try {
-        const size = 32;
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
-
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, size, size);
-
-        const { data } = ctx.getImageData(0, 0, size, size);
-        const buckets = new Map();
-
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const a = data[i + 3];
-
-          if (a < 200) continue;
-
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          const lightness = (max + min) / 2;
-
-          // Skip near-black / near-white pixels: they dominate most
-          // album art (borders, backgrounds) but make poor accents.
-          if (lightness < 18 || lightness > 235) continue;
-
-          const key = `${r >> 4}-${g >> 4}-${b >> 4}`;
-          const saturation = max === 0 ? 0 : (max - min) / max;
-          const weight = 1 + saturation * 2;
-
-          const bucket =
-            buckets.get(key) || { r: 0, g: 0, b: 0, weight: 0 };
-
-          bucket.r += r * weight;
-          bucket.g += g * weight;
-          bucket.b += b * weight;
-          bucket.weight += weight;
-
-          buckets.set(key, bucket);
-        }
-
-        let best = null;
-        for (const bucket of buckets.values()) {
-          if (!best || bucket.weight > best.weight) best = bucket;
-        }
-
-        if (!best) {
-          resolve(null);
-          return;
-        }
-
-        resolve({
-          r: Math.round(best.r / best.weight),
-          g: Math.round(best.g / best.weight),
-          b: Math.round(best.b / best.weight)
-        });
-      } catch (error) {
-        reject(error);
-      }
-    };
-
-    img.onerror = () => reject(new Error("Cover image failed to load"));
-    img.src = url;
-  });
-}
-
-// Pushes a sampled color toward a punchier "accent" version rather
-// than using the raw (often muddy/dark) average pixel color.
-function boostColor(color) {
-  const max = Math.max(color.r, color.g, color.b) || 1;
-  const scale = Math.min(255 / max, 1.6);
-
-  return {
-    r: Math.min(255, Math.round(color.r * scale)),
-    g: Math.min(255, Math.round(color.g * scale)),
-    b: Math.min(255, Math.round(color.b * scale))
-  };
-}
-
-function setNpColorVars(player, color) {
-  const accent = `rgb(${color.r}, ${color.g}, ${color.b})`;
-  const glow = `rgba(${color.r}, ${color.g}, ${color.b}, .55)`;
-  const glowSoft = `rgba(${color.r}, ${color.g}, ${color.b}, .18)`;
-
-  player.style.setProperty("--np-accent", accent);
-  player.style.setProperty("--np-glow", glow);
-  player.style.setProperty("--np-glow-soft", glowSoft);
-
-  currentAccentCSS = accent;
-
-  if (waveform.ready) {
-    const ratio =
-      audio.duration ? audio.currentTime / audio.duration : 0;
-    drawWaveformBars(ratio);
-  }
-}
-
-function animateNpColors(player, rawColor) {
-  const target = rawColor ? boostColor(rawColor) : { ...DEFAULT_NP_COLOR };
-  const from = { ...currentNpColor };
-  const duration = 500;
-  const start = performance.now();
-
-  if (coverColorAnimationFrame) {
-    cancelAnimationFrame(coverColorAnimationFrame);
-  }
-
-  function step(now) {
-    const t = Math.min(1, (now - start) / duration);
-    const eased = t * (2 - t); // ease-out, no extra deps needed
-
-    const current = {
-      r: Math.round(from.r + (target.r - from.r) * eased),
-      g: Math.round(from.g + (target.g - from.g) * eased),
-      b: Math.round(from.b + (target.b - from.b) * eased)
-    };
-
-    setNpColorVars(player, current);
-    currentNpColor = current;
-
-    if (t < 1) {
-      coverColorAnimationFrame = requestAnimationFrame(step);
-    } else {
-      coverColorAnimationFrame = null;
-    }
-  }
-
-  coverColorAnimationFrame = requestAnimationFrame(step);
-}
-
-async function applyCoverColor(song) {
-  const token = ++coverColorToken;
-  const player = document.querySelector(".player");
-  if (!player) return;
-
-  if (!song.cover_url) {
-    animateNpColors(player, null);
-    return;
-  }
-
-  try {
-    const color = await extractDominantColor(song.cover_url);
-    if (token !== coverColorToken) return; // Song changed meanwhile.
-    animateNpColors(player, color);
-  } catch (error) {
-    console.error("Cover color extraction:", error);
-    if (token === coverColorToken) animateNpColors(player, null);
-  }
-}
-
-/* =========================================================
-   SYNCHRONIZED LYRICS
-   ---------------------------------------------------------
-   Clean, self-contained data model so real timestamped lyrics can be
-   wired up from the existing API the moment a song/lyrics endpoint
-   returns them (either song.lyrics_lrc / song.lyrics on the song
-   object itself, or a dedicated GET /songs/:id/lyrics response). If
-   neither is present, a graceful "Lyrics unavailable" state is shown
-   — ordinary, non-timestamped lyrics are never faked as synced.
-
-   Lyrics data shape once loaded:
-     {
-       songId: <id>,
-       available: true,
-       lines: [
-         {
-           time: <seconds, Number>,
-           text: <string>,
-           words: [{ time: <seconds>, text: <string> }] | null
-         },
-         ...
-       ]
-     }
-   ========================================================= */
-
-const lyricsState = {
-  songId: null,
-  available: false,
-  lines: [],
-  activeLineIndex: -1,
-  visible: false
-};
-
-let lyricsToken = 0;
-
-// Parses standard LRC ("[mm:ss.xx] text") and, when present, inline
-// word-level timestamps in enhanced-LRC form ("<mm:ss.xx>word").
-// Unknown/metadata tags (e.g. [ar:], [ti:]) are ignored rather than
-// treated as lyric lines.
-function parseLRC(lrcText) {
-  if (typeof lrcText !== "string" || !lrcText.trim()) return [];
-
-  const lineTimeTag = /\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]/g;
-  const wordTimeTag = /<(\d{1,3}):(\d{2}(?:\.\d{1,3})?)>/g;
-
-  const rawLines = lrcText.split(/\r?\n/);
-  const lines = [];
-
-  for (const rawLine of rawLines) {
-    const timeTags = [...rawLine.matchAll(lineTimeTag)];
-    if (!timeTags.length) continue; // Metadata tag or blank/plain line.
-
-    const textPart = rawLine.replace(lineTimeTag, "").trim();
-    if (!textPart) continue;
-
-    // Parse optional word-level tags embedded in the remaining text.
-    const wordMatches = [...textPart.matchAll(wordTimeTag)];
-    let words = null;
-
-    if (wordMatches.length) {
-      words = [];
-      const segments = textPart.split(wordTimeTag);
-      // split() on a global regex with capture groups interleaves
-      // captured groups (min, sec) into the array; walk it back into
-      // { time, text } pairs.
-      for (let i = 0; i < wordMatches.length; i++) {
-        const minutes = Number(wordMatches[i][1]);
-        const seconds = Number(wordMatches[i][2]);
-        const wordText =
-          (segments[(i + 1) * 3] || "").trim();
-
-        if (wordText) {
-          words.push({
-            time: minutes * 60 + seconds,
-            text: wordText
-          });
-        }
-      }
-
-      if (!words.length) words = null;
-    }
-
-    const cleanText =
-      textPart.replace(wordTimeTag, "").trim();
-
-    if (!cleanText) continue;
-
-    // A single LRC line can carry multiple timestamps (repeated
-    // chorus lines reusing the same text) — emit one entry per tag.
-    for (const tag of timeTags) {
-      const minutes = Number(tag[1]);
-      const seconds = Number(tag[2]);
-
-      lines.push({
-        time: minutes * 60 + seconds,
-        text: cleanText,
-        words
-      });
-    }
-  }
-
-  lines.sort((a, b) => a.time - b.time);
-  return lines;
-}
-
-// Looks for lyrics in the shape the existing API is most likely to
-// eventually provide them in, without assuming a route that doesn't
-// exist yet. Tries, in order: an LRC string already on the song
-// object, a pre-parsed lines array already on the song object, then
-// a dedicated read-only endpoint. Any failure here is caught by the
-// caller and treated as "no lyrics available" — never a hard error.
-async function fetchLyricsForSong(song) {
-  if (Array.isArray(song.lyrics_lines) && song.lyrics_lines.length) {
-    return song.lyrics_lines;
-  }
-
-  if (typeof song.lyrics_lrc === "string" && song.lyrics_lrc.trim()) {
-    return parseLRC(song.lyrics_lrc);
-  }
-
-  if (typeof song.lyrics === "string" && song.lyrics.trim()) {
-    return parseLRC(song.lyrics);
-  }
-
-  // Not present on the song object — ask the API directly. This
-  // endpoint doesn't exist on the backend yet; once it does (e.g.
-  // returning { success, lrc } or { success, lines }), this starts
-  // working with no further frontend changes.
-  const data = await api(`/songs/${song.id}/lyrics`);
-
-  if (Array.isArray(data.lines) && data.lines.length) {
-    return data.lines;
-  }
-
-  if (typeof data.lrc === "string" && data.lrc.trim()) {
-    return parseLRC(data.lrc);
-  }
-
-  return [];
-}
-
-async function loadLyrics(song) {
-  const token = ++lyricsToken;
-
-  lyricsState.songId = song.id;
-  lyricsState.available = false;
-  lyricsState.lines = [];
-  lyricsState.activeLineIndex = -1;
-
-  try {
-    const lines = await fetchLyricsForSong(song);
-
-    if (token !== lyricsToken) return; // Superseded by a newer song.
-
-    if (Array.isArray(lines) && lines.length) {
-      lyricsState.lines = lines;
-      lyricsState.available = true;
-    }
-  } catch (error) {
-    // Expected until a real lyrics endpoint exists — not logged as
-    // an error, just treated as "unavailable" for this song.
-    lyricsState.available = false;
-  }
-
-  renderLyrics();
-  updateLyricsToggleState();
-}
-
-function renderLyrics() {
-  const scroll = document.getElementById("lyricsScroll");
-  if (!scroll) return;
-
-  if (!lyricsState.available || !lyricsState.lines.length) {
-    scroll.innerHTML =
-      `<div class="lyrics-empty" id="lyricsEmpty">Lyrics unavailable</div>`;
-    return;
-  }
-
-  scroll.innerHTML = lyricsState.lines.map((line, index) => {
-    const inner =
-      Array.isArray(line.words) && line.words.length
-        ? line.words.map(word =>
-            `<span class="lyrics-word" data-time="${word.time}">${escapeHTML(word.text)}</span>`
-          ).join(" ")
-        : escapeHTML(line.text);
-
-    return `
-      <div class="lyrics-line" data-index="${index}" data-time="${line.time}">
-        ${inner}
-      </div>
-    `;
-  }).join("");
-
-  scroll.querySelectorAll(".lyrics-line").forEach(el => {
-    el.addEventListener("click", () => {
-      const time = Number(el.dataset.time);
-      if (Number.isFinite(time)) {
-        audio.currentTime = time;
-        if (audio.paused) audio.play().catch(console.error);
-      }
-    });
-  });
-}
-
-// Called from updateProgress()'s existing timeupdate hook. Finds the
-// last line whose timestamp has passed, highlights it, auto-scrolls
-// it into view, and (when word-level timestamps exist) progressively
-// highlights individual words within the active line.
-function syncLyrics(currentTime) {
-  if (!lyricsState.available || !lyricsState.lines.length) return;
-
-  const lines = lyricsState.lines;
-  let activeIndex = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].time <= currentTime) {
-      activeIndex = i;
-    } else {
-      break;
-    }
-  }
-
-  if (activeIndex !== lyricsState.activeLineIndex) {
-    const scroll = document.getElementById("lyricsScroll");
-
-    if (scroll) {
-      const previous =
-        scroll.querySelector(".lyrics-line.active");
-      if (previous) previous.classList.remove("active");
-
-      if (activeIndex >= 0) {
-        const activeEl =
-          scroll.querySelector(`.lyrics-line[data-index="${activeIndex}"]`);
-
-        if (activeEl) {
-          activeEl.classList.add("active");
-          activeEl.scrollIntoView({
-            behavior: "smooth",
-            block: "center"
-          });
-        }
-      }
-    }
-
-    lyricsState.activeLineIndex = activeIndex;
-  }
-
-  if (activeIndex >= 0) {
-    const activeLine = lines[activeIndex];
-
-    if (Array.isArray(activeLine.words) && activeLine.words.length) {
-      const scroll = document.getElementById("lyricsScroll");
-      const activeEl =
-        scroll && scroll.querySelector(`.lyrics-line[data-index="${activeIndex}"]`);
-
-      if (activeEl) {
-        activeEl.querySelectorAll(".lyrics-word").forEach(wordEl => {
-          const wordTime = Number(wordEl.dataset.time);
-          wordEl.classList.toggle(
-            "sung",
-            Number.isFinite(wordTime) && wordTime <= currentTime
-          );
-        });
-      }
-    }
-  }
-}
-
-function updateLyricsToggleState() {
-  const toggle = document.getElementById("lyricsToggle");
-  if (!toggle) return;
-
-  // Always tappable (so the "Lyrics unavailable" state is reachable),
-  // but dimmed when this song has nothing synced to show.
-  toggle.classList.toggle("no-lyrics", !lyricsState.available);
-}
-
-function toggleLyricsView() {
-  lyricsState.visible = !lyricsState.visible;
-
-  const cover = document.getElementById("playerCover");
-  const panel = document.getElementById("lyricsPanel");
-  const toggle = document.getElementById("lyricsToggle");
-
-  if (cover) cover.classList.toggle("hidden", lyricsState.visible);
-  if (panel) panel.classList.toggle("hidden", !lyricsState.visible);
-
-  if (toggle) {
-    toggle.classList.toggle("active", lyricsState.visible);
-    toggle.setAttribute("aria-pressed", String(lyricsState.visible));
-    toggle.setAttribute(
-      "aria-label",
-      lyricsState.visible ? "Show cover art" : "Show lyrics"
-    );
-  }
-}
-
-function setupLyricsToggle() {
-  const toggle = document.getElementById("lyricsToggle");
-  if (!toggle) return;
-
-  toggle.addEventListener("click", toggleLyricsView);
-}
 
