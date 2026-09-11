@@ -1047,13 +1047,22 @@ async function loadGroupSongs() {
 }
 
 function renderGroupPlaylistHome() {
+  // Always show this Home section — even with zero group songs — so
+  // the Group Playlist has a permanent, discoverable spot on Home
+  // instead of only appearing once someone has posted a track.
   showHomeSection(
     "groupPlaylistHomeSection",
-    state.groupSongs.length > 0
+    true
   );
 
   const container = document.getElementById("groupPlaylistHomeList");
   if (!container) return;
+
+  if (!state.groupSongs.length) {
+    container.innerHTML =
+      `<div class="empty">No group tracks yet</div>`;
+    return;
+  }
 
   const songs = state.groupSongs.slice(0, 10);
 
