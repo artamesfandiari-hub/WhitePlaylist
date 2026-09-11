@@ -3956,44 +3956,82 @@ function resolveCoverUrl(url) {
 // Sets the mini player / full player cover container to either the
 // real cover art (with fallback restoration on error) or the exact
 // original placeholder markup, unchanged.
+//
+// This preloads the new artwork off-DOM and only touches the
+// container once it has actually finished loading. The previous
+// version swapped `container.innerHTML` immediately (destroying
+// whatever was currently shown) and then waited for the new <img> to
+// load before it faded in — so on every single song change there was
+// a real gap, confirmed on screen recording, where the container sat
+// completely empty (no cover, no placeholder) until the new image
+// arrived. Waiting for the load first means the old cover simply
+// stays put, unchanged, right up until the new one is ready to
+// appear — there's never a moment with nothing in the container.
 function setCoverArt(containerId, coverUrl, altText, placeholderHTML) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
+  const token = (coverArtTokens.get(containerId) || 0) + 1;
+  coverArtTokens.set(containerId, token);
+
   if (!coverUrl) {
-    coverArtTokens.set(containerId, (coverArtTokens.get(containerId) || 0) + 1);
     container.innerHTML = placeholderHTML;
     return;
   }
+
+  const resolvedUrl = resolveCoverUrl(coverUrl);
 
   // If this exact artwork is already showing in this container
   // (resuming the same song, or back-to-back tracks off the same
   // album/single), leave the current <img> in place instead of
   // tearing it down and rebuilding it from scratch. Recreating an
   // already-loaded image restarts its fade/scale-in animation, which
-  // is what made the cover visibly "jump" on every song change even
-  // when the artwork itself hadn't changed.
+  // is also part of what made the cover visibly "jump" even when the
+  // artwork itself hadn't changed.
   const existingImg = container.querySelector("img.cover-art");
-  if (existingImg && existingImg.src === resolveCoverUrl(coverUrl)) {
+  if (existingImg && existingImg.src === resolvedUrl) {
     return;
   }
 
-  const token = (coverArtTokens.get(containerId) || 0) + 1;
-  coverArtTokens.set(containerId, token);
-
   const safeAlt = escapeHTML(altText || "Album cover");
-  const safeSrc = escapeHTML(coverUrl);
 
-  container.innerHTML = `
-    <img
-      class="cover-art"
-      src="${safeSrc}"
-      alt="${safeAlt}"
-      decoding="async"
-      onload="this.classList.add('cover-art-loaded')"
-      onerror="handleCoverErrorForContainer('${containerId}', ${token}, this)"
-    />
-  `;
+  const preload = new Image();
+  preload.decoding = "async";
+
+  preload.onload = () => {
+    if (coverArtTokens.get(containerId) !== token) return; // superseded meanwhile
+
+    if (existingImg && existingImg.isConnected) {
+      // Reuse the <img> that's already on screen and just repoint it
+      // at the now-preloaded (already cached) URL — the browser can
+      // paint it right away instead of clearing to blank while it
+      // loads a second time.
+      existingImg.src = resolvedUrl;
+      existingImg.alt = safeAlt;
+      existingImg.classList.add("cover-art-loaded");
+      return;
+    }
+
+    // First real cover shown in this container (it was a placeholder
+    // before) — build the element fresh and let its normal fade/
+    // scale-in transition run, one frame after insertion so the
+    // opacity:0 starting state actually gets painted first.
+    container.innerHTML = `
+      <img
+        class="cover-art"
+        src="${escapeHTML(resolvedUrl)}"
+        alt="${safeAlt}"
+        decoding="async"
+      />
+    `;
+    requestAnimationFrame(() => {
+      const img = container.querySelector("img.cover-art");
+      if (img) img.classList.add("cover-art-loaded");
+    });
+  };
+
+  preload.onerror = () => handleCoverErrorForContainer(containerId, token);
+  preload.src = resolvedUrl;
 }
 
 function handleCoverErrorForContainer(containerId, token, img) {
