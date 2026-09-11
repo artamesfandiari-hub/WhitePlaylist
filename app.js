@@ -1095,10 +1095,10 @@ function renderArtists() {
     state.artists.map(artist => `
       <button
         class="library-item"
-        data-artist-id="${artist.id}"
+        data-artist-id="${escapeHTML(String(artist.id))}"
       >
         <div class="library-icon">
-          ${ICONS.artist}
+          ${artistCoverInnerHTML(artist.cover_url, artist.name)}
         </div>
 
         <div class="library-info">
@@ -1119,7 +1119,7 @@ function renderArtists() {
 
   container.querySelectorAll("[data-artist-id]").forEach(button => {
     button.addEventListener("click", () => {
-      openArtist(Number(button.dataset.artistId));
+      openArtist(button.dataset.artistId);
     });
   });
 }
@@ -1133,7 +1133,11 @@ async function openArtist(id) {
     const container = document.getElementById("artistDetail");
 
     container.innerHTML = `
-      <div class="detail-header">
+      <div class="detail-header artist-detail-header">
+        <div class="artist-detail-cover">
+          ${artistCoverInnerHTML(artist.cover_url, artist.name)}
+        </div>
+
         <h1 class="detail-title">
           ${escapeHTML(artist.name)}
         </h1>

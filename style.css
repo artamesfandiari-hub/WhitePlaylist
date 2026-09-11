@@ -254,6 +254,32 @@ main { width: 100%; }
   font-size: 14px;
 }
 
+/* ARTIST DETAIL — a circular photo above the name, additive to the
+   shared .detail-header used by albums/playlists (which are
+   untouched: this only applies where .artist-detail-header is also
+   present). */
+.artist-detail-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.artist-detail-cover {
+  width: 116px;
+  height: 116px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+}
+
+.artist-detail-cover svg { width: 44px; height: 44px; }
+
 /* ---------- 5. SONGS ---------- */
 .song-list { display: flex; flex-direction: column; gap: 4px; }
 
