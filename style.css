@@ -942,7 +942,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-menu-btn:active { transform: translateX(8px) scale(.9); color: #fff; }
 
 .player-cover {
-  width: min(90vw, 412px, calc(var(--app-vh, 100dvh) * 0.34));
+  width: min(90vw, 340px, calc(var(--app-vh, 100dvh) * 0.28));
   aspect-ratio: 1;
   /* Never let flex shrink this — with a fixed width and aspect-ratio
      1, shrinking the flex (height) axis alone would squash it into a
@@ -952,8 +952,11 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   /* Top margin clears .player-top-row's own height (40px) plus a
      natural gap, so the cover always sits a consistent, balanced
      distance below the close/menu buttons instead of depending on
-     how the rest of the sheet happens to be centered. */
-  margin: clamp(46px, calc(var(--app-vh, 100dvh) * 0.09), 60px) auto clamp(14px, calc(var(--app-vh, 100dvh) * 0.035), 28px);
+     how the rest of the sheet happens to be centered. Kept fairly
+     tight (smaller than the cover/lyrics used to be) so the whole
+     block of content sits higher, leaving guaranteed breathing room
+     for the controls row at the bottom on every screen size. */
+  margin: clamp(40px, calc(var(--app-vh, 100dvh) * 0.07), 54px) auto clamp(10px, calc(var(--app-vh, 100dvh) * 0.02), 20px);
   border-radius: 18px;
   background: #151515;
   display: flex; align-items: center; justify-content: center;
@@ -997,7 +1000,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-title-row {
   width: 100%;
   flex-shrink: 0;
-  margin-top: clamp(14px, calc(var(--app-vh, 100dvh) * 0.035), 28px);
+  margin-top: clamp(10px, calc(var(--app-vh, 100dvh) * 0.02), 20px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1038,7 +1041,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   width: 100%;
   flex: 1 1 auto;
   min-height: 56px;
-  margin-top: clamp(8px, calc(var(--app-vh, 100dvh) * 0.02), 18px);
+  margin-top: clamp(6px, calc(var(--app-vh, 100dvh) * 0.015), 14px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1111,7 +1114,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   width: 100%;
   height: 34px;
   flex-shrink: 0;
-  margin-top: clamp(20px, calc(var(--app-vh, 100dvh) * 0.042), 34px);
+  margin-top: clamp(14px, calc(var(--app-vh, 100dvh) * 0.03), 24px);
 }
 
 .waveform-canvas {
@@ -1188,7 +1191,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   align-items: center;
   justify-content: center;
   gap: 14px;
-  margin-top: clamp(22px, calc(var(--app-vh, 100dvh) * 0.06), 46px);
+  margin-top: clamp(14px, calc(var(--app-vh, 100dvh) * 0.04), 30px);
   position: relative;
   z-index: 10;
 }
