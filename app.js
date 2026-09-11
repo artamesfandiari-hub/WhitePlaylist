@@ -3506,6 +3506,13 @@ const LYRICS_NEGATIVE_WORDS = new Set([
   // English — common profanity
   "fuck","fucking","fucked","fucker","shit","bitch","ass","asshole",
   "damn","bastard","slut","whore","dick","pussy","crap","hoe",
+  // English — added: decay/despair/heartbreak vocabulary
+  "wither","withered","decay","decayed","poison","poisoned","cage",
+  "caged","haunt","haunted","haunting","despair","desperate","abandon",
+  "abandoned","betrayed","forsaken","doom","doomed","grim","bitter",
+  "bitterness","weep","weeping","mourning","torment","tormented",
+  "agony","anguish","dread","gloom","gloomy","shatter","shattered",
+  "crush","crushed","fade","faded","fading","vanish","vanished",
   // Persian — hate / dark feelings
   "کینه","بغض","نفرت","درد","خون","گریه","اشک","غم","غمگین","تنها",
   "تنهایی","شکسته","زخم","ترس","تاریک","تاریکی","شیطان","دشمن",
@@ -3513,6 +3520,10 @@ const LYRICS_NEGATIVE_WORDS = new Set([
   "عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم","پشیمون",
   "پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا","انتقام",
   "زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
+  // Persian — added: despair/grief vocabulary
+  "دلتنگی","حسرت","ماتم","عذاب","شکنجه","درماندگی","ناامید",
+  "ناامیدی","بیچاره","بدبخت","مصیبت","فاجعه","خرابی","انزوا",
+  "غربت","بی‌وفا","بی‌رحم","دلشکسته","افسرده","ناراحت","پریشان",
   // Persian — death / killing (all the conjugations that come up)
   "مرگ","مردن","مردم","مردی","مرد","مردیم","مردید","مردند",
   "می‌میرم","می‌میری","می‌میره","می‌میریم","می‌میرید","می‌میرند",
@@ -3551,6 +3562,14 @@ const LYRICS_POSITIVE_WORDS = new Set([
   "successful","blossom","bloom","laugh","laughter","rescue",
   "rescued","saved","salvation","truth","honest","loyalty","fly",
   "flying","wings","rainbow","miracle",
+  // English — added: joy/warmth vocabulary
+  "joyous","blissful","bliss","radiant","radiance","harmony",
+  "harmonious","tender","tenderness","embrace","cherish","cherished",
+  "treasure","treasured","comfort","comforting","serene","serenity",
+  "blossoming","flourish","flourishing","unity","united","triumph",
+  "triumphant","courage","courageous","brave","bravery","inspire",
+  "inspired","inspiring","wonderful","marvelous","delight",
+  "delightful","cheer","cheerful","optimistic","optimism",
   // Persian
   "عشق","امید","نور","شادی","خوشحال","لبخند","درخشیدن","آزاد",
   "آزادی","آرامش","شفا","رویا","زیبا","برکت","ایمان","اعتماد","گرم",
@@ -3559,6 +3578,11 @@ const LYRICS_POSITIVE_WORDS = new Set([
   "مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
   "خوشبختی","موفقیت","رهایی","نجات","بهار","گل","خنده","محبت",
   "وفا","صداقت","تولد",
+  // Persian — added: joy/warmth vocabulary
+  "شادمانی","سرور","هماهنگی","نوازش","محبوب","گرامی","دلگرم",
+  "دلگرمی","شکوفا","شکوفایی","اتحاد","یگانگی","پیروزمند","شجاعت",
+  "شجاع","دلیر","الهام","شگفت‌انگیز","لذت","لذت‌بخش","سرزنده",
+  "امیدوار","خوشبین",
 ]);
 
 // Exact color names → the CSS color they should render as. Checked
@@ -3579,6 +3603,19 @@ const LYRICS_COLOR_WORDS = {
   emerald: "#10b981", ruby: "#e11d48", amber: "#f59e0b",
   coral: "#fb7185", magenta: "#d946ef", lime: "#84cc16",
   olive: "#a3b325", bronze: "#b08d57", platinum: "#cbd5e1",
+  // English — added: concept words with a real, recognizable color
+  // (not color-name adjectives, but things everyone pictures in one
+  // color) — sky/water blue, fire orange, grass green, etc.
+  sky: "#38bdf8", water: "#38bdf8", ocean: "#0e7490", sea: "#0e7490",
+  azure: "#38bdf8", aqua: "#22d3ee", sun: "#facc15", fire: "#f97316",
+  flame: "#f97316", grass: "#22c55e", leaf: "#22c55e", leaves: "#22c55e",
+  snow: "#ffffff", rose: "#ec4899", lemon: "#eab308", cherry: "#ef4444",
+  honey: "#f59e0b", wine: "#b91c1c", sand: "#d6c7a1", mint: "#6ee7b7",
+  jade: "#10b981", sapphire: "#2563eb", cobalt: "#1d4ed8",
+  peach: "#fca5a5", salmon: "#fb7185", mustard: "#ca8a04",
+  cinnamon: "#b45309", chocolate: "#92400e", cream: "#f5f0e6",
+  rust: "#b91c1c", copper: "#c2703d", lilac: "#c4b5fd", plum: "#86198f",
+  pearl: "#f5f0e6",
   // Persian
   "قرمز": "#ef4444", "آبی": "#3b82f6", "سبز": "#22c55e",
   "زرد": "#eab308", "نارنجی": "#f97316", "بنفش": "#a855f7",
@@ -3590,6 +3627,17 @@ const LYRICS_COLOR_WORDS = {
   "یاقوتی": "#e11d48", "کهربایی": "#f59e0b", "مرجانی": "#fb7185",
   "سرخابی": "#d946ef", "لیمویی": "#84cc16", "زیتونی": "#a3b325",
   "برنزی": "#b08d57", "سرمه‌ای": "#60a5fa",
+  // Persian — added: concept words with a real, recognizable color
+  "آسمان": "#38bdf8", "آسمون": "#38bdf8", "آب": "#38bdf8",
+  "دریا": "#0e7490", "اقیانوس": "#0e7490", "خورشید": "#facc15",
+  "آتش": "#f97316", "شعله": "#f97316", "چمن": "#22c55e",
+  "برگ": "#22c55e", "برف": "#ffffff", "رز": "#ec4899",
+  "گل‌رز": "#ec4899", "لیمو": "#eab308", "گیلاس": "#ef4444",
+  "آلبالو": "#ef4444", "عسل": "#f59e0b", "شراب": "#b91c1c",
+  "شن": "#d6c7a1", "هلویی": "#fca5a5", "خردلی": "#ca8a04",
+  "دارچینی": "#b45309", "شکلاتی": "#92400e", "مسی": "#c2703d",
+  "لاجوردی": "#2563eb", "یشمی": "#10b981", "ارغوانی": "#a855f7",
+  "گلبهی": "#fca5a5", "مرواریدی": "#f5f0e6", "زرشکی": "#b91c1c",
 };
 
 // Strips punctuation/case for matching against the lists above, but
