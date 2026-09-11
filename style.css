@@ -1019,55 +1019,35 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   position: relative;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  mask-image: linear-gradient(180deg, transparent 0, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 88%, transparent 100%);
 }
 .player-lyrics::-webkit-scrollbar { display: none; }
-
-/* Static spotlight sitting at dead-center of the box — the active
-   line is always scrolled to this point (see scrollLyricsToActive()
-   in app.js), so this glow never needs to move; it just quietly
-   marks "this is the line that matters" without adding any motion
-   of its own. Sits behind the text (z-index 0), never intercepts
-   taps (pointer-events: none). */
-.player-lyrics::before {
-  content: "";
-  position: absolute;
-  left: 8%;
-  right: 8%;
-  top: 50%;
-  height: 38px;
-  transform: translateY(-50%);
-  border-radius: 999px;
-  background: radial-gradient(60% 100% at 50% 50%, var(--player-glow-soft), transparent 72%);
-  pointer-events: none;
-  z-index: 0;
-}
 
 .player-lyrics-track {
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   /* Top/bottom padding roughly half the viewport height so the
      first and last lines can still be scrolled to dead center. */
-  padding: 44px 0;
-  position: relative;
-  z-index: 1;
+  padding: 40px 0;
 }
 
+/* Every line starts as a small, near-invisible caption — almost a
+   placeholder — so the jump to the active line reads as a real
+   typographic event, not a gentle size bump. */
 .player-lyrics-line {
   width: 100%;
   max-width: 100%;
-  padding: 3px 20px;
-  font-size: 13.5px;
-  font-weight: 650;
-  line-height: 20px;
+  padding: 2px 18px;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 16px;
   text-align: center;
   color: #fff;
-  opacity: .16;
-  transform: scale(.96);
-  filter: blur(.6px);
+  opacity: .13;
+  transform: scale(.82);
   /* No more clipped "…" on long lines — if a line still doesn't
      fit after the auto-shrink app.js applies to the active line,
      it scrolls horizontally on its own instead of truncating. */
@@ -1077,35 +1057,36 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: pointer;
-  transition: opacity var(--dur-slow) var(--ease), font-size var(--dur-slow) var(--ease),
-              transform var(--dur-slow) var(--ease), filter var(--dur-slow) var(--ease),
-              letter-spacing var(--dur-slow) var(--ease), text-shadow var(--dur-slow) var(--ease);
+  transform-origin: center;
+  transition: opacity var(--dur) var(--ease), font-size var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 .player-lyrics-line::-webkit-scrollbar { display: none; }
-.player-lyrics-line:active { transform: scale(.94); }
+.player-lyrics-line:active { transform: scale(.9); }
 
-.player-lyrics-line[data-distance="1"] { opacity: .42; transform: scale(.98); filter: blur(.3px); }
-.player-lyrics-line[data-distance="2"] { opacity: .2; transform: scale(.97); filter: blur(.5px); }
+.player-lyrics-line[data-distance="1"] { opacity: .3; font-size: 13px; transform: scale(.86); }
+.player-lyrics-line[data-distance="2"] { opacity: .16; }
 
-/* The active line: a touch larger, fully sharp, faintly lit by the
-   spotlight above it — and it eases up into place rather than just
-   snapping to its new opacity, so every line change reads as a
-   small, deliberate entrance instead of a flicker. */
+/* THE ACTIVE LINE — the whole point: big, heavy, punchy display
+   type that pops into place with a spring overshoot instead of
+   fading in politely. No letter-spacing added (keeps Persian/Arabic
+   script joined correctly); size + weight + motion carry the
+   "typography moment" instead. */
 .player-lyrics-line[data-distance="0"] {
-  font-size: 18px;
-  line-height: 24px;
-  letter-spacing: .1px;
+  padding: 2px 14px;
+  font-size: clamp(23px, 7.2vw, 29px);
+  font-weight: 800;
+  line-height: 1.22;
   color: #fff;
   opacity: 1;
   transform: scale(1);
-  filter: blur(0);
-  text-shadow: 0 0 20px var(--player-glow-soft);
-  animation: lyricRiseIn 480ms var(--ease);
+  animation: lyricPop 560ms cubic-bezier(.22, 1.6, .36, 1);
 }
 
-@keyframes lyricRiseIn {
-  from { opacity: .4; transform: scale(.93) translateY(5px); filter: blur(2px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+@keyframes lyricPop {
+  0%   { opacity: 0; transform: scale(.55); }
+  55%  { opacity: 1; transform: scale(1.08); }
+  78%  { transform: scale(.97); }
+  100% { transform: scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
