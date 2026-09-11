@@ -1001,45 +1001,61 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 .player-artist.identity-fade { opacity: 0; }
 
-/* INLINE LYRICS TICKER — always part of the player layout (no
-   button/panel needed). Shows the active line plus one line of
-   context on each side (3 lines total), faded further the farther
-   they are from what's currently playing. Tapping any visible line
-   seeks to it, same as the waveform/progress bar. */
+/* SCROLLABLE LYRICS — the full lyric list lives in the DOM at once;
+   app.js keeps the currently-playing line centered by smooth-
+   scrolling this container (see scrollLyricsToActive()), and lines
+   are faded by distance from that active line via [data-distance].
+   The user can freely scroll/swipe through the whole list to read
+   ahead — doing so pauses the auto-recenter for a few seconds (see
+   setupLyricsInteraction()) instead of yanking the view back
+   immediately, and it always resumes by smoothly centering on the
+   active line rather than jumping in from an edge. */
 .player-lyrics {
   width: 100%;
-  height: 84px;
+  height: 104px;
   margin-top: clamp(8px, 2dvh, 18px);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
-  mask-image: linear-gradient(180deg, transparent 0, #000 15%, #000 85%, transparent 100%);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(180deg, transparent 0, #000 18%, #000 82%, transparent 100%);
 }
+.player-lyrics::-webkit-scrollbar { display: none; }
 
 .player-lyrics-track {
   width: 100%;
-  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  gap: 8px;
+  /* Top/bottom padding roughly half the viewport height so the
+     first and last lines can still be scrolled to dead center. */
+  padding: 44px 0;
 }
 
 .player-lyrics-line {
   width: 100%;
   max-width: 100%;
-  padding: 2px 16px;
+  padding: 3px 20px;
   font-size: 14px;
   font-weight: 650;
   line-height: 20px;
   text-align: center;
   color: #fff;
-  overflow: hidden;
+  opacity: .18;
+  /* No more clipped "…" on long lines — if a line still doesn't
+     fit after the auto-shrink app.js applies to the active line,
+     it scrolls horizontally on its own instead of truncating. */
+  overflow-x: auto;
+  overflow-y: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   cursor: pointer;
   transition: opacity var(--dur) var(--ease), font-size var(--dur) var(--ease);
 }
+.player-lyrics-line::-webkit-scrollbar { display: none; }
 .player-lyrics-line:active { transform: scale(.98); }
 
 .player-lyrics-line[data-distance="0"] {
@@ -1047,7 +1063,8 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   line-height: 24px;
   opacity: 1;
 }
-.player-lyrics-line[data-distance="1"] { opacity: .4; }
+.player-lyrics-line[data-distance="1"] { opacity: .45; }
+.player-lyrics-line[data-distance="2"] { opacity: .22; }
 
 .player-lyrics-status {
   width: 100%;
@@ -1056,6 +1073,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   font-size: 13px;
   font-weight: 600;
 }
+
 
 /* PROGRESS + WAVEFORM — two separate visual layers sharing one hit
    area. The waveform canvas (real amplitude bars, drawn by
@@ -1069,7 +1087,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   position: relative;
   width: 100%;
   height: 34px;
-  margin-top: clamp(12px, 3.2dvh, 26px);
+  margin-top: clamp(20px, 4.2dvh, 34px);
 }
 
 .waveform-canvas {

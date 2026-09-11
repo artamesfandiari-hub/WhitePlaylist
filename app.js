@@ -2278,6 +2278,7 @@ async function openAddToPlaylist(song) {
 
 function setupPlayer() {
   updatePlaybackModeButton();
+  setupLyricsInteraction();
 
   document
     .getElementById("miniPlayer")
@@ -3200,6 +3201,19 @@ const lyricsCache = new Map();
 let lyricsRequestToken = 0;
 let activeLyricsLineIndex = -1;
 
+// Manual-scroll handling: while the user is actively browsing the
+// lyric list, auto-recenter is paused until this timestamp; when it
+// elapses, playback resumes smoothly centering the active line
+// instead of snapping/jumping in from an edge. lyricsProgrammaticScroll
+// distinguishes our own smooth-scrolls from the user's so they don't
+// re-trigger the pause on themselves.
+let lyricsUserScrollUntil = 0;
+let lyricsResumeTimer = null;
+let lyricsProgrammaticScroll = false;
+let lyricsProgScrollTimer = null;
+let lyricsInteractionReady = false;
+const LYRICS_RESUME_DELAY = 3200; // ms of no interaction before recentering
+
 function lyricsStorageKey(songId) {
   return `wp_lrc_${songId}`;
 }
@@ -3242,10 +3256,12 @@ function loadLyrics(song) {
   if (!track) return;
 
   activeLyricsLineIndex = -1;
+  lyricsUserScrollUntil = 0;
+  clearTimeout(lyricsResumeTimer);
 
   const cached = lyricsCache.get(song.id);
   if (cached) {
-    renderPlayerLyricsTicker(cached, -1);
+    buildLyricsList(cached);
     return;
   }
 
@@ -3259,7 +3275,7 @@ function loadLyrics(song) {
 
   if (stored) {
     lyricsCache.set(song.id, stored);
-    renderPlayerLyricsTicker(stored, -1);
+    buildLyricsList(stored);
     return;
   }
 
@@ -3272,7 +3288,7 @@ function loadLyrics(song) {
       lyricsCache.set(song.id, result);
       saveLyricsToStorage(song.id, result);
 
-      renderPlayerLyricsTicker(result, activeLyricsLineIndex);
+      buildLyricsList(result);
     })
     .catch(error => {
       console.error("Lyrics:", error);
@@ -3280,7 +3296,7 @@ function loadLyrics(song) {
 
       const result = { lines: [], unavailable: true };
       lyricsCache.set(song.id, result);
-      renderPlayerLyricsTicker(result, -1);
+      buildLyricsList(result);
     });
 }
 
@@ -3422,14 +3438,12 @@ function parseLRC(lrcText) {
   return lines;
 }
 
-// Renders the inline lyrics ticker: the active line (distance 0)
-// plus up to one line of context on each side, faded further the
-// farther they sit from what's currently playing (see the
-// .player-lyrics-line[data-distance] rules in style.css). Called
-// whenever lyrics data first loads for a song (activeIndex -1, no
-// line highlighted yet) and again every time updateLyricsSync()
-// below detects the active line has changed.
-function renderPlayerLyricsTicker(result, activeIndex) {
+// Builds the full scrollable lyric list for `result` (called once
+// per song load — see loadLyrics()). Every line is rendered up
+// front with data-index so the whole song can be scrolled/swiped
+// through; setActiveLyricsLine() below handles highlighting +
+// auto-centering as playback progresses without rebuilding this.
+function buildLyricsList(result) {
   const track = document.getElementById("playerLyricsTrack");
   if (!track) return;
 
@@ -3447,34 +3461,26 @@ function renderPlayerLyricsTicker(result, activeIndex) {
   }
 
   const lines = result.lines;
-  const WINDOW = 1; // lines of context shown on each side
 
-  let html = "";
-  for (let offset = -WINDOW; offset <= WINDOW; offset++) {
-    const index = activeIndex + offset;
-    const line = lines[index];
-
-    if (!line) {
-      html += `
-        <div class="player-lyrics-line" data-distance="${Math.abs(offset)}" aria-hidden="true">&nbsp;</div>
-      `;
-      continue;
-    }
-
-    html += `
-      <div class="player-lyrics-line" data-distance="${Math.abs(offset)}" data-index="${index}">
-        ${escapeHTML(line.text || "\u00A0")}
-      </div>
-    `;
-  }
-
-  track.innerHTML = html;
+  track.innerHTML = lines
+    .map(
+      (line, index) => `
+        <div class="player-lyrics-line" data-distance="3" data-index="${index}">
+          ${escapeHTML(line.text || "\u00A0")}
+        </div>
+      `
+    )
+    .join("");
 
   // Tapping a visible line seeks to it, same as dragging the
   // progress bar — it only sets audio.currentTime, it never
   // starts/stops playback.
   track.querySelectorAll(".player-lyrics-line[data-index]").forEach(el => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", event => {
+      // A tap that's really the end of a horizontal swipe (reading a
+      // long line) shouldn't also seek — only a plain tap does.
+      if (el.dataset.swiped === "1") return;
+
       const index = Number(el.dataset.index);
       const time = lines[index]?.time;
       if (Number.isFinite(time) && audio.duration) {
@@ -3482,7 +3488,117 @@ function renderPlayerLyricsTicker(result, activeIndex) {
         updateProgress();
       }
     });
+
+    // Track horizontal-scroll-vs-tap on lines long enough to scroll,
+    // so swiping to read the rest of a long line doesn't seek.
+    let startX = 0;
+    let startScroll = 0;
+    el.addEventListener(
+      "touchstart",
+      event => {
+        el.dataset.swiped = "0";
+        startX = event.touches[0].clientX;
+        startScroll = el.scrollLeft;
+      },
+      { passive: true }
+    );
+    el.addEventListener(
+      "touchmove",
+      event => {
+        if (Math.abs(event.touches[0].clientX - startX) > 6 || el.scrollLeft !== startScroll) {
+          el.dataset.swiped = "1";
+        }
+      },
+      { passive: true }
+    );
   });
+
+  setupLyricsInteraction();
+
+  // Land on the active line if we already know it (e.g. rebuilt
+  // mid-playback); otherwise just settle at the top of the list.
+  requestAnimationFrame(() => scrollLyricsToActive(activeLyricsLineIndex, false));
+}
+
+// Smoothly scrolls the lyrics container so the line at `index` sits
+// dead-center — never lets it appear to climb in from the bottom.
+// Marks the scroll as programmatic so the container's own 'scroll'
+// listener (see setupLyricsInteraction()) doesn't mistake it for the
+// user browsing and re-pause itself.
+function scrollLyricsToActive(index, smooth) {
+  const container = document.getElementById("playerLyrics");
+  const track = document.getElementById("playerLyricsTrack");
+  if (!container || !track || index < 0) return;
+
+  const el = track.querySelector(`.player-lyrics-line[data-index="${index}"]`);
+  if (!el) return;
+
+  const targetTop = el.offsetTop + el.offsetHeight / 2 - container.clientHeight / 2;
+
+  lyricsProgrammaticScroll = true;
+  clearTimeout(lyricsProgScrollTimer);
+  container.scrollTo({ top: Math.max(0, targetTop), behavior: smooth ? "smooth" : "auto" });
+  lyricsProgScrollTimer = setTimeout(() => {
+    lyricsProgrammaticScroll = false;
+  }, 500);
+}
+
+// Highlights the line at `index` (and fades its neighbors by
+// distance), then re-centers the view on it — unless the user is
+// mid-scroll/just finished scrolling, in which case the highlight
+// still updates but the view is left alone until they've paused for
+// LYRICS_RESUME_DELAY (see setupLyricsInteraction()).
+function setActiveLyricsLine(index) {
+  const track = document.getElementById("playerLyricsTrack");
+  if (!track) return;
+
+  track.querySelectorAll(".player-lyrics-line[data-index]").forEach(el => {
+    const lineIndex = Number(el.dataset.index);
+    const distance = index < 0 ? 3 : Math.min(3, Math.abs(lineIndex - index));
+    el.dataset.distance = String(distance);
+
+    // Long active lines shrink a little first so fewer of them need
+    // the horizontal swipe-to-read fallback.
+    if (distance === 0) {
+      const len = el.textContent.trim().length;
+      el.style.fontSize = len > 46 ? "15px" : len > 30 ? "16.5px" : "";
+    } else {
+      el.style.fontSize = "";
+    }
+  });
+
+  if (Date.now() < lyricsUserScrollUntil) return; // user is reading elsewhere — leave the view alone
+  scrollLyricsToActive(index, true);
+}
+
+// Wires up pause-on-manual-scroll for the lyrics list (once — the
+// container element itself is static across songs, only its content
+// is rebuilt by buildLyricsList()). Any real user scroll (touch
+// drag, wheel, or a resulting 'scroll' that isn't ours) pushes the
+// auto-recenter out by LYRICS_RESUME_DELAY; once that elapses with
+// no further interaction, the view smoothly settles back on the
+// current line instead of jumping there.
+function setupLyricsInteraction() {
+  if (lyricsInteractionReady) return;
+
+  const container = document.getElementById("playerLyrics");
+  if (!container) return;
+  lyricsInteractionReady = true;
+
+  const pause = () => {
+    if (lyricsProgrammaticScroll) return;
+
+    lyricsUserScrollUntil = Date.now() + LYRICS_RESUME_DELAY;
+    clearTimeout(lyricsResumeTimer);
+    lyricsResumeTimer = setTimeout(() => {
+      lyricsUserScrollUntil = 0;
+      scrollLyricsToActive(activeLyricsLineIndex, true);
+    }, LYRICS_RESUME_DELAY);
+  };
+
+  container.addEventListener("touchstart", pause, { passive: true });
+  container.addEventListener("wheel", pause, { passive: true });
+  container.addEventListener("scroll", pause);
 }
 
 // Called from updateProgress() (the existing "timeupdate" handler) —
@@ -3509,7 +3625,7 @@ function updateLyricsSync() {
 
   if (index !== activeLyricsLineIndex) {
     activeLyricsLineIndex = index;
-    renderPlayerLyricsTicker(cached, index);
+    setActiveLyricsLine(index);
   }
 }
 
