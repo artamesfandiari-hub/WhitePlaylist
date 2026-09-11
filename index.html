@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260911-7">
+  <link rel="stylesheet" href="style.css?v=20260911-8">
 </head>
 
 <body>
@@ -186,19 +186,37 @@
           <div class="hscroll" id="homeRecommendationsList"></div>
         </div>
 
-        <!-- GROUP PLAYLIST -->
-        <div class="home-section hidden" id="groupPlaylistHomeSection">
+        <!-- DISCOVER (public music shared by everyone — a separate
+             catalog from the personal library above; see
+             discoverHomeCard's click handler / discoverPage below) -->
+        <div class="home-section" id="discoverHomeSection">
           <div class="section-heading">
-            <h2>Group Playlist</h2>
-            <button id="seeAllGroupPlaylist">See all</button>
+            <h2>Discover</h2>
           </div>
 
-          <div
-            class="song-list"
-            id="groupPlaylistHomeList"
+          <button
+            class="library-item"
+            id="discoverHomeCard"
+            type="button"
           >
-            <div class="loading">Loading...</div>
-          </div>
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+              </svg>
+            </div>
+
+            <div class="library-info">
+              <div class="library-name">Public Music</div>
+              <div class="library-meta" id="discoverHomeMeta">Loading…</div>
+            </div>
+
+            <div class="library-arrow">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="9 5 16 12 9 19"></polyline>
+              </svg>
+            </div>
+          </button>
         </div>
 
         <!-- RECENTLY ADDED (existing, moved lower) -->
@@ -249,10 +267,16 @@
         </div>
       </section>
 
-      <!-- GROUP PLAYLIST (full list) -->
+      <!-- DISCOVER (public music page — a distinct catalog view,
+           separate from the personal Songs/Search above. Reuses the
+           same song-item rows and the existing audio/player system;
+           the only difference per row is "Add to Library" instead of
+           the personal ⋯ menu, since these songs aren't owned by the
+           viewer. See loadDiscoverSongs()/discoverSongHTML() in
+           app.js.) -->
       <section
         class="page"
-        id="groupPlaylistPage"
+        id="discoverPage"
       >
         <button
           class="back-button"
@@ -265,12 +289,21 @@
         </button>
 
         <div class="page-title-row">
-          <h1>Group Playlist</h1>
+          <h1>Discover</h1>
+        </div>
+
+        <div class="search-section discover-search-section">
+          <input
+            id="discoverSearchInput"
+            type="search"
+            placeholder="Search public tracks..."
+            autocomplete="off"
+          >
         </div>
 
         <div
           class="song-list"
-          id="groupPlaylistList"
+          id="discoverList"
         >
           <div class="loading">Loading...</div>
         </div>
@@ -958,7 +991,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260911-9"></script>
+  <script src="app.js?v=20260911-10"></script>
 
 </body>
 </html>

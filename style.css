@@ -202,6 +202,11 @@ main { width: 100%; }
 
 .search-section input::placeholder { color: var(--text-muted); }
 
+/* DISCOVER's own search box sits inside a .page that already has
+   16px of horizontal padding — drop .search-section's own left/right
+   padding here so it doesn't stack, while keeping its input styling. */
+.discover-search-section { padding: 0 0 14px; }
+
 .search-section input:focus {
   border-color: var(--border-strong);
   background: var(--surface-3);
@@ -393,6 +398,15 @@ main { width: 100%; }
 .song-actions .liked { color: #fff; }
 .song-actions .liked svg { fill: currentColor; stroke: currentColor; }
 .song-menu-btn svg { width: 18px; height: 18px; }
+
+/* DISCOVER — "Add to Library" row button (replaces the personal ⋯
+   menu on public songs). Same 36px icon-button base as every other
+   .song-actions button above; only the "added" success state and
+   in-flight "loading" state are new. */
+.song-action-add svg { width: 18px; height: 18px; }
+.song-actions .song-action-add.added { color: #fff; }
+.song-actions .song-action-add.added svg { fill: currentColor; stroke: currentColor; }
+.song-actions .song-action-add.loading { opacity: .5; pointer-events: none; }
 
 .rank-badge {
   flex: 0 0 22px;

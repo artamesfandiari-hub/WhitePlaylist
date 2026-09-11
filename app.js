@@ -58,7 +58,7 @@ const state = {
       : null,
 
   songs: [],
-  groupSongs: [],
+  discoverSongs: [],
   favorites: [],
   artists: [],
   albums: [],
@@ -236,6 +236,12 @@ const ICONS = {
       <circle cx="12" cy="12" r="2"></circle>
       <circle cx="19" cy="12" r="2"></circle>
     </svg>
+  `,
+
+  check: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <polyline points="4 12 9 17 20 6"></polyline>
+    </svg>
   `
 };
 
@@ -291,6 +297,7 @@ async function init() {
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
+  setupDiscoverNavigation();
 
   renderHomeGreeting();
 
@@ -302,7 +309,7 @@ async function init() {
 
   await Promise.allSettled([
     loadSongs(),
-    loadGroupSongs(),
+    loadDiscoverSongs(),
     loadFavorites(),
     loadArtists(),
     loadAlbums(),
@@ -391,10 +398,6 @@ function setupNavigation() {
   document
     .getElementById("seeAllSongs")
     .addEventListener("click", () => showPage("songsPage"));
-
-  document
-    .getElementById("seeAllGroupPlaylist")
-    ?.addEventListener("click", () => showPage("groupPlaylistPage"));
 
   document.querySelectorAll("[data-back]").forEach(button => {
     button.addEventListener("click", () => {
@@ -1021,73 +1024,79 @@ function findSong(id) {
 }
 
 /* =========================================================
-   GROUP PLAYLIST
-   (songs sent to the configured Telegram group — kept fully
-   separate from the personal library above. Read-only from this
-   app's point of view: playback reuses the exact same <audio>
-   element/queue as everywhere else, but there's no favorite/
-   delete/add-to-playlist here since these songs aren't owned by
-   the viewing user.)
+   DISCOVER (public music)
+   A second, fully separate catalog inside the app: public songs
+   posted to the configured Telegram group, shared identically to
+   every user (never filtered per-viewer — see GET /group-songs on
+   the backend). Kept strictly apart from the personal library above:
+   these songs are never auto-added to Songs/Favorites/Smart
+   Mix/search/Recently Played just by being played here — only an
+   explicit tap on "Add to Library" (addSongToLibrary() below) copies
+   one into the viewer's own library. Playback reuses the exact same
+   <audio> element/queue/full-player as the personal library; no
+   second player is created.
    ========================================================= */
 
-async function loadGroupSongs() {
+async function loadDiscoverSongs() {
   try {
     const data = await api("/group-songs?limit=200");
 
-    state.groupSongs = data.songs || [];
+    state.discoverSongs = markPublic(data.songs);
 
-    renderGroupPlaylistHome();
-    renderGroupPlaylistPage();
+    renderDiscoverHome();
+    renderDiscoverList(state.discoverSongs);
   } catch (error) {
-    console.error("Group playlist:", error);
+    console.error("Discover:", error);
 
-    showError("groupPlaylistHomeList", "Couldn't load Group Playlist.");
-    showError("groupPlaylistList", "Couldn't load Group Playlist.");
+    const meta = document.getElementById("discoverHomeMeta");
+    if (meta) meta.textContent = "Couldn't load";
+
+    showError("discoverList", "Couldn't load public tracks.");
   }
 }
 
-function renderGroupPlaylistHome() {
-  // Always show this Home section — even with zero group songs — so
-  // the Group Playlist has a permanent, discoverable spot on Home
-  // instead of only appearing once someone has posted a track.
-  showHomeSection(
-    "groupPlaylistHomeSection",
-    true
-  );
+// Tags each song object as public/non-personal (see the _public
+// check in startPlayback() below) without touching anything the
+// server sent — a plain client-side marker, never persisted.
+function markPublic(songs) {
+  return (songs || []).map(song => ({ ...song, _public: true }));
+}
 
-  const container = document.getElementById("groupPlaylistHomeList");
+function renderDiscoverHome() {
+  const meta = document.getElementById("discoverHomeMeta");
+  if (!meta) return;
+
+  const count = state.discoverSongs.length;
+
+  meta.textContent =
+    count
+      ? `${count} public track${count === 1 ? "" : "s"}`
+      : "No public tracks yet";
+}
+
+// Renders whichever song list is currently active on the Discover
+// page — either the full public catalog (loadDiscoverSongs above) or
+// a filtered result set (searchDiscover below). `songs` is also the
+// queue context handed to playSong() when a row is tapped.
+function renderDiscoverList(songs) {
+  const container = document.getElementById("discoverList");
   if (!container) return;
 
-  if (!state.groupSongs.length) {
+  if (!songs.length) {
     container.innerHTML =
-      `<div class="empty">No group tracks yet</div>`;
+      `<div class="empty">No public tracks yet</div>`;
     return;
   }
 
-  const songs = state.groupSongs.slice(0, 10);
-
-  container.innerHTML = songs.map(groupSongHTML).join("");
-  bindGroupSongButtons(container, songs);
+  container.innerHTML = songs.map(discoverSongHTML).join("");
+  bindDiscoverSongButtons(container, songs);
 }
 
-function renderGroupPlaylistPage() {
-  const container = document.getElementById("groupPlaylistList");
-  if (!container) return;
-
-  if (!state.groupSongs.length) {
-    container.innerHTML =
-      `<div class="empty">No songs in the group yet.</div>`;
-    return;
-  }
-
-  container.innerHTML = state.groupSongs.map(groupSongHTML).join("");
-  bindGroupSongButtons(container, state.groupSongs);
-}
-
-// Same visual row as songHTML(), minus the "⋯" actions button —
-// favoriting/deleting/adding-to-playlist all act on the viewer's own
-// library and don't apply to a shared group song.
-function groupSongHTML(song) {
+// Same visual row as songHTML(), but swaps the personal "⋯" menu
+// (favorite/add-to-playlist/delete — all acts on the viewer's own
+// library) for an explicit "Add to Library" button, since a public
+// song isn't owned by the viewer until they choose to copy it.
+function discoverSongHTML(song) {
   const artist = song.artist || "Unknown Artist";
   const album = song.album || "Unknown Album";
 
@@ -1120,30 +1129,135 @@ function groupSongHTML(song) {
         </div>
       </button>
 
+      <div class="song-actions">
+        <button
+          class="song-action-add"
+          data-action="add-to-library"
+          data-id="${song.id}"
+          aria-label="Add to Library"
+        >
+          ${ICONS.plus}
+        </button>
+      </div>
+
     </div>
   `;
 }
 
-function bindGroupSongButtons(container, songsList) {
+function bindDiscoverSongButtons(container, songsList) {
   if (!container) return;
 
-  const list = Array.isArray(songsList) ? songsList : state.groupSongs;
+  const list = Array.isArray(songsList) ? songsList : state.discoverSongs;
 
-  container.querySelectorAll("[data-action='play']").forEach(button => {
+  container.querySelectorAll("[data-action]").forEach(button => {
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
 
+      const action = button.dataset.action;
       const id = Number(button.dataset.id);
       const song = list.find(item => Number(item.id) === id);
 
       if (!song) return;
 
-      playSong(song, list);
+      if (action === "play") playSong(song, list);
+      if (action === "add-to-library") addSongToLibrary(song, button);
     });
   });
 
   highlightPlayingRow();
+}
+
+// Explicit, user-initiated copy of one public song into the viewer's
+// own personal library (POST /group-songs/:id/add-to-library). Never
+// called automatically by playback — only by this button tap. The
+// backend both creates the personal copy and prevents a duplicate if
+// this same song was already added in a previous session.
+async function addSongToLibrary(song, button) {
+  if (!button || button.disabled) return;
+
+  button.disabled = true;
+  button.classList.add("loading");
+
+  try {
+    const data = await api(`/group-songs/${song.id}/add-to-library`, {
+      method: "POST"
+    });
+
+    button.classList.remove("loading");
+    button.classList.add("added");
+    button.innerHTML = ICONS.check;
+    button.setAttribute(
+      "aria-label",
+      data.already_in_library
+        ? "Already in your library"
+        : "Added to your library"
+    );
+
+    // The personal library changed — refresh Songs/Recently Added so
+    // the new copy shows up there without a full app reload. This
+    // never touches the Discover list itself.
+    loadSongs().catch(console.error);
+  } catch (error) {
+    console.error("Add to library:", error);
+
+    button.disabled = false;
+    button.classList.remove("loading");
+    alert(error.message || "Couldn't add this song to your library.");
+  }
+}
+
+/* =========================================================
+   DISCOVER NAVIGATION + SEARCH
+   (a separate real page/view, not an expanded Home section — see
+   #discoverPage in index.html. Its search box queries only the
+   public catalog via GET /group-songs?q=..., completely separate
+   from the personal search() function/searchPage above.)
+   ========================================================= */
+
+function setupDiscoverNavigation() {
+  document
+    .getElementById("discoverHomeCard")
+    ?.addEventListener("click", () => showPage("discoverPage"));
+
+  setupDiscoverSearch();
+}
+
+let discoverSearchTimer;
+
+function setupDiscoverSearch() {
+  const input = document.getElementById("discoverSearchInput");
+  if (!input) return;
+
+  input.addEventListener("input", () => {
+    clearTimeout(discoverSearchTimer);
+
+    discoverSearchTimer = setTimeout(
+      () => searchDiscover(input.value),
+      350
+    );
+  });
+}
+
+async function searchDiscover(query) {
+  const q = query.trim();
+
+  // Cleared search: go back to browsing the full public catalog
+  // already loaded by loadDiscoverSongs(), no extra request needed.
+  if (!q) {
+    renderDiscoverList(state.discoverSongs);
+    return;
+  }
+
+  try {
+    const data =
+      await api(`/group-songs?limit=200&q=${encodeURIComponent(q)}`);
+
+    renderDiscoverList(markPublic(data.songs));
+  } catch (error) {
+    console.error("Discover search:", error);
+    showError("discoverList", "Couldn't search public tracks.");
+  }
 }
 
 /* =========================================================
@@ -2619,12 +2733,19 @@ function startPlayback(song) {
 
   updatePlayerUI();
 
-  api("/recently-played", {
-    method: "POST",
-    body: JSON.stringify({
-      song_id: song.id
-    })
-  }).catch(console.error);
+  // Public Discover songs aren't owned by the viewer (see
+  // markPublic() / addSongToLibrary() above) and the backend's
+  // Recently Played is scoped to the viewer's own songs, so this
+  // call would just 404 for them — skip it rather than let playing a
+  // public track silently fail an API call every time.
+  if (!song._public) {
+    api("/recently-played", {
+      method: "POST",
+      body: JSON.stringify({
+        song_id: song.id
+      })
+    }).catch(console.error);
+  }
 }
 
 function togglePlay() {
