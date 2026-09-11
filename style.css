@@ -1,16 +1,11 @@
 /* =========================================================
-   WHITE PLAYLIST — DESIGN SYSTEM (Atelier Noir — luxury pass)
+   WHITE PLAYLIST — DESIGN SYSTEM
    1. Reset            6. Cards / Library
    2. Tokens           7. Player (mini + full)
    3. Base / Layout     8. Modals & Bottom Sheets
    4. Typography        9. Bottom Navigation
    5. Songs             10. States / Skeletons / Responsive / A11y
    ========================================================= */
-
-/* Editorial display serif for the brand lockup and hero numerals,
-   paired with the existing system sans for everything readable.
-   Presentation-only addition — no markup depends on it loading. */
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@500;600;700;800&display=swap");
 
 /* ---------- 1. RESET ---------- */
 * {
@@ -47,42 +42,38 @@ svg { display: block; overflow: visible; }
 
 /* ---------- 2. TOKENS ---------- */
 :root {
-  /* Surfaces — deepened toward true obsidian, each layer given a
-     faint warm undertone (rather than neutral grey) so the whole
-     stack reads as lacquered black, not "dark mode grey". */
-  --bg: #060605;
-  --surface: #0f0e0c;
-  --surface-2: #151310;
-  --surface-3: #1c1916;
-  --surface-glass: rgba(15, 14, 12, .80);
-  --surface-glass-strong: rgba(11, 10, 9, .94);
+  /* Surfaces — kept on the original #090909 base, layered upward */
+  --bg: #090909;
+  --surface: #111111;
+  --surface-2: #161616;
+  --surface-3: #1d1d1d;
+  --surface-glass: rgba(18, 18, 18, .78);
+  --surface-glass-strong: rgba(15, 15, 15, .92);
 
-  --border: rgba(212, 179, 122, .12);
-  --border-strong: rgba(212, 179, 122, .24);
+  --border: rgba(255, 255, 255, .07);
+  --border-strong: rgba(255, 255, 255, .13);
 
-  --text: #f7f4ee;
-  --text-secondary: #a89e8d;
-  --text-muted: #746b5d;
+  --text: #f6f6f6;
+  --text-secondary: #9a9a9a;
+  --text-muted: #6c6c6c;
 
-  /* Champagne-gold accent — the "premium" signature: every glow,
-     favorite state, active nav item and CTA shares this one warm
-     metal so the app reads as a single crafted material rather
-     than a bolted-on color. */
-  --accent: #d9b878;
-  --accent-2: #f0dba8;
-  --accent-contrast: #14100a;
-  --accent-glow: rgba(217, 184, 120, .55);
-  --accent-glow-soft: rgba(217, 184, 120, .16);
-  --gold-gradient: linear-gradient(135deg, #f3e2b6 0%, #d9b878 45%, #b8894a 100%);
-  --gold-line: linear-gradient(90deg, transparent, rgba(217, 184, 120, .65), transparent);
-  --danger: #e0685c;
+  /* Monochrome accent (the "White" in White Playlist) plus a soft
+     lavender-white undertone already present in the app's ambient
+     background — reused here as the one accent hue so glows,
+     favorites and the playing state all feel like one family
+     rather than a bolted-on color. */
+  --accent: #ffffff;
+  --accent-contrast: #0a0a0a;
+  --accent-glow: rgba(178, 160, 219, .55);
+  --accent-glow-soft: rgba(178, 160, 219, .18);
+  --danger: #ff5c52;
 
   /* Player-only glow, tinted per-song from the cover's dominant
      color (see updatePlayerDynamicColor() in app.js). Defaults to
-     the champagne accent glow above, and is scoped to the
-     player/mini-player only so nothing else in the app (focus
-     rings, the playing-row highlight, home ambient background) is
-     affected by a song's color. */
+     the original lavender-white accent glow above, and is scoped
+     to the player/mini-player only so nothing else in the app
+     (focus rings, the playing-row highlight, home ambient
+     background) is affected by a song's color. */
   --player-glow: var(--accent-glow);
   --player-glow-soft: var(--accent-glow-soft);
 
@@ -91,12 +82,9 @@ svg { display: block; overflow: visible; }
   --radius-lg: 20px;
   --radius-xl: 26px;
 
-  --shadow-sm: 0 4px 18px rgba(0, 0, 0, .45);
-  --shadow-md: 0 16px 40px rgba(0, 0, 0, .55);
-  --shadow-lg: 0 30px 74px rgba(0, 0, 0, .65);
-  --shadow-gold: 0 10px 30px rgba(217, 184, 120, .22);
-
-  --font-display: "Cormorant Garamond", "SF Pro Display", Georgia, serif;
+  --shadow-sm: 0 4px 16px rgba(0, 0, 0, .35);
+  --shadow-md: 0 14px 34px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 26px 64px rgba(0, 0, 0, .55);
 
   --ease: cubic-bezier(.22, 1, .36, 1);
   --dur-fast: 150ms;
@@ -113,7 +101,7 @@ svg { display: block; overflow: visible; }
 html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: "Manrope", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -122,20 +110,6 @@ html, body {
   width: 100%;
   min-height: 100vh;
   padding-bottom: 90px;
-}
-
-/* Fine film-grain, laid over the whole app at near-zero opacity —
-   the difference between "flat dark UI" and "lacquered material".
-   Fixed + pointer-events:none so it never touches interaction. */
-#app::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 121;
-  pointer-events: none;
-  opacity: .05;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
 main { width: 100%; }
@@ -157,28 +131,18 @@ main { width: 100%; }
   align-items: center;
   justify-content: space-between;
   padding: calc(16px + env(safe-area-inset-top)) 18px 16px;
-  background: rgba(6, 6, 5, .86);
+  background: rgba(9, 9, 9, .86);
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   border-bottom: 1px solid var(--border);
 }
 
-.topbar::after {
-  content: "";
-  position: absolute;
-  left: 18px; right: 18px; bottom: -1px;
-  height: 1px;
-  background: var(--gold-line);
-  opacity: .7;
-}
-
 .brand {
-  font-family: var(--font-display);
-  font-size: 23px;
-  font-weight: 600;
-  font-style: italic;
-  letter-spacing: 2.5px;
-  background: var(--gold-gradient);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 3.5px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #ffffff 0%, #cfcfcf 45%, #ffffff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -187,10 +151,9 @@ main { width: 100%; }
 .subtitle {
   margin-top: 5px;
   color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 1.6px;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .3px;
 }
 
 .icon-button {
@@ -208,11 +171,11 @@ main { width: 100%; }
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
 
-.icon-button:active { transform: scale(.92); background: rgba(217, 184, 120, .12); }
+.icon-button:active { transform: scale(.92); background: rgba(255, 255, 255, .1); }
 .icon-button svg { width: 21px; height: 21px; }
 
-#searchButton { color: var(--accent) !important; }
-#searchButton svg { fill: none !important; stroke: var(--accent) !important; }
+#searchButton { color: #fff !important; }
+#searchButton svg { fill: none !important; stroke: #fff !important; }
 
 /* SEARCH */
 .search-section { padding: 14px 16px 4px; }
@@ -248,22 +211,19 @@ main { width: 100%; }
 .page-title-row h1,
 .section-heading h2 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 27px;
-  font-weight: 600;
-  letter-spacing: .2px;
+  font-size: 23px;
+  font-weight: 750;
+  letter-spacing: -.2px;
 }
 
 .section-heading button {
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .4px;
-  text-transform: uppercase;
-  transition: color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: color var(--dur) var(--ease);
 }
 
-.section-heading button:active { opacity: .6; }
+.section-heading button:active { color: var(--text); }
 
 .back-button {
   width: auto;
@@ -283,10 +243,9 @@ main { width: 100%; }
 
 .detail-title {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 32px;
-  font-weight: 600;
-  letter-spacing: .1px;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -.3px;
 }
 
 .detail-subtitle {
@@ -316,7 +275,7 @@ main { width: 100%; }
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-md), 0 0 0 1px var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .artist-detail-cover svg { width: 44px; height: 44px; }
@@ -339,8 +298,8 @@ main { width: 100%; }
 /* Currently playing row — visual-only class toggled from app.js,
    never changes markup or data. */
 .song-item.playing { background: linear-gradient(90deg, var(--accent-glow-soft), transparent 70%); }
-.song-item.playing .song-title { color: var(--accent-2); }
-.song-item.playing .song-cover { box-shadow: 0 0 0 1.5px rgba(217, 184, 120, .6) inset; }
+.song-item.playing .song-title { color: #fff; }
+.song-item.playing .song-cover { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .5) inset; }
 
 /* Equalizer overlay — sits on top of the cover art (which stays
    visible through the translucent wash underneath). Runs on its own
@@ -351,7 +310,7 @@ main { width: 100%; }
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background-color: rgba(217, 184, 120, .32);
+  background-color: rgba(255, 255, 255, .28);
   background-repeat: no-repeat;
   background-position: 32% 100%, 45% 100%, 58% 100%, 71% 100%;
   background-image:
@@ -381,7 +340,7 @@ main { width: 100%; }
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  background: linear-gradient(150deg, #262019, #100e0a);
+  background: linear-gradient(150deg, #2a2a2a, #101010);
   color: var(--text-muted);
   overflow: hidden;
   position: relative;
@@ -422,7 +381,7 @@ main { width: 100%; }
 }
 
 .song-actions button:active { transform: scale(.88); }
-.song-actions .liked { color: var(--accent); }
+.song-actions .liked { color: #fff; }
 .song-actions .liked svg { fill: currentColor; stroke: currentColor; }
 .song-menu-btn svg { width: 18px; height: 18px; }
 
@@ -450,7 +409,7 @@ main { width: 100%; }
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-.library-item:active { transform: scale(.985); background: var(--surface-2); border-color: var(--border-strong); }
+.library-item:active { transform: scale(.985); background: var(--surface-2); }
 
 .library-icon {
   width: 48px;
@@ -485,7 +444,7 @@ main { width: 100%; }
 .library-item.destructive .library-name { color: var(--danger); }
 
 #songActionFavorite.active svg { fill: currentColor !important; stroke: currentColor !important; }
-#songActionFavorite.active .library-icon { color: var(--accent); background: var(--surface-3); }
+#songActionFavorite.active .library-icon { color: #fff; background: var(--surface-3); }
 
 /* PLAYLIST SHARING */
 .playlist-share-row { margin-bottom: 22px; }
@@ -510,7 +469,7 @@ main { width: 100%; }
 .playlist-share-row--active {
   padding: 14px;
   border-radius: var(--radius-lg);
-  background: linear-gradient(165deg, #18150f 0%, #0c0b09 100%);
+  background: linear-gradient(165deg, #171717 0%, #101010 100%);
   border: 1px solid var(--border-strong);
 }
 
@@ -556,8 +515,7 @@ main { width: 100%; }
 .home-share-prompt:active { transform: scale(.985); background: rgba(255, 255, 255, .07); }
 
 /* BUTTONS — glass by default; the single true CTA (.primary-button)
-   stays solid champagne-gold so it's still the clearest action on
-   screen. */
+   stays solid white so it's still the clearest action on screen. */
 .add-button {
   width: 40px;
   height: 40px;
@@ -573,7 +531,7 @@ main { width: 100%; }
   box-shadow: var(--shadow-sm);
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
-.add-button:active { transform: scale(.9); background: rgba(217, 184, 120, .16); }
+.add-button:active { transform: scale(.9); background: rgba(255, 255, 255, .14); }
 .add-button svg { width: 19px; height: 19px; stroke: currentColor; }
 
 .primary-button, .secondary-button {
@@ -583,11 +541,7 @@ main { width: 100%; }
   font-weight: 700;
   transition: transform var(--dur-fast) var(--ease), opacity var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.primary-button {
-  background: var(--gold-gradient);
-  color: var(--accent-contrast);
-  box-shadow: var(--shadow-gold);
-}
+.primary-button { background: #fff; color: #000; }
 .primary-button:active, .secondary-button:active { transform: scale(.97); }
 .secondary-button {
   background: rgba(255, 255, 255, .06);
@@ -623,12 +577,10 @@ main { width: 100%; }
 .home-header { margin-bottom: 26px; }
 
 .home-greeting {
-  font-family: var(--font-display);
-  font-size: 32px;
-  font-weight: 600;
-  font-style: italic;
-  letter-spacing: .2px;
-  background: var(--gold-gradient);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.3px;
+  background: linear-gradient(135deg, #ffffff 0%, #cfcfcf 55%, #ffffff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -673,7 +625,7 @@ main { width: 100%; }
   gap: 14px;
   padding: 14px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(165deg, #18150f 0%, #0c0b09 100%);
+  background: linear-gradient(165deg, #171717 0%, #101010 100%);
   border: 1px solid var(--border-strong);
   position: relative;
   overflow: hidden;
@@ -683,7 +635,7 @@ main { width: 100%; }
 .continue-cover {
   width: 64px; height: 64px; flex: 0 0 64px;
   border-radius: var(--radius-md);
-  background: linear-gradient(150deg, #262019, #100e0a);
+  background: linear-gradient(150deg, #2a2a2a, #101010);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); overflow: hidden; position: relative;
 }
@@ -700,9 +652,9 @@ main { width: 100%; }
 
 .continue-play {
   flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
-  background: var(--gold-gradient); color: var(--accent-contrast);
+  background: #fff; color: #000;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-gold);
+  box-shadow: var(--shadow-sm);
 }
 .continue-play svg { width: 20px; height: 20px; fill: currentColor; stroke: none; margin-left: 2px; }
 
@@ -713,30 +665,21 @@ main { width: 100%; }
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 20px 20px 20px 22px;
+  padding: 18px 18px 18px 20px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, #1c1912 0%, #131110 65%, #0b0a08 100%);
+  background: linear-gradient(135deg, #242424 0%, #131313 65%, #0d0d0d 100%);
   border: 1px solid var(--border-strong);
   text-align: left;
   position: relative;
   overflow: hidden;
-  box-shadow: var(--shadow-md);
 }
 
 .smart-mix-card::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(120% 140% at 0% 0%, rgba(217, 184, 120, .14), transparent 55%);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,.08), transparent 55%);
   pointer-events: none;
-}
-
-.smart-mix-card::after {
-  content: "";
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 1px;
-  background: var(--gold-line);
 }
 
 .smart-mix-card:active { transform: scale(.985); }
@@ -744,19 +687,18 @@ main { width: 100%; }
 
 .smart-mix-text { min-width: 0; }
 .smart-mix-label {
-  font-family: var(--font-display);
-  font-size: 23px; font-weight: 600; font-style: italic;
-  background: var(--gold-gradient);
+  font-size: 19px; font-weight: 800;
+  background: linear-gradient(135deg, #ffffff 0%, #cfcfcf 55%, #ffffff 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.smart-mix-subtitle { margin-top: 5px; color: var(--text-secondary); font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
+.smart-mix-subtitle { margin-top: 4px; color: #999; font-size: 13px; font-weight: 500; }
 
 .smart-mix-play {
   flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%;
-  background: var(--gold-gradient); color: var(--accent-contrast);
+  background: #fff; color: #000;
   display: flex; align-items: center; justify-content: center;
   position: relative;
-  box-shadow: var(--shadow-gold);
+  box-shadow: var(--shadow-sm);
 }
 .smart-mix-play svg { width: 21px; height: 21px; fill: currentColor; stroke: none; margin-left: 2px; }
 .smart-mix-play.spinning svg { display: none; }
@@ -764,8 +706,8 @@ main { width: 100%; }
   content: "";
   width: 18px; height: 18px;
   border-radius: 50%;
-  border: 2px solid rgba(20, 16, 10, .35);
-  border-top-color: var(--accent-contrast);
+  border: 2px solid #ccc;
+  border-top-color: #000;
   animation: smart-mix-spin .7s linear infinite;
 }
 @keyframes smart-mix-spin { to { transform: rotate(360deg); } }
@@ -776,7 +718,7 @@ main { width: 100%; }
 .hcard-cover {
   width: 132px; height: 132px;
   border-radius: var(--radius-md);
-  background: linear-gradient(150deg, #262019, #100e0a);
+  background: linear-gradient(150deg, #2a2a2a, #101010);
   color: var(--text-muted);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
@@ -790,7 +732,7 @@ main { width: 100%; }
 .artist-card-cover {
   width: 88px; height: 88px; margin: 0 auto;
   border-radius: 50%;
-  background: linear-gradient(150deg, #262019, #100e0a);
+  background: linear-gradient(150deg, #2a2a2a, #101010);
   color: var(--text-muted);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
@@ -804,7 +746,7 @@ main { width: 100%; }
 .playlist-card-cover {
   width: 128px; height: 128px;
   border-radius: var(--radius-md);
-  background: linear-gradient(150deg, #2e2717, #100e0a);
+  background: linear-gradient(150deg, #262433, #101010);
   color: #999;
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-sm);
@@ -827,7 +769,7 @@ main { width: 100%; }
 .cover-art.cover-art-loaded { opacity: 1; transform: scale(1); }
 
 .music-unicode {
-  color: #e3c896; font-size: 30px; line-height: 1;
+  color: #fff; font-size: 30px; line-height: 1;
   font-family: "Times New Roman", "Noto Music", serif; font-weight: 400;
   user-select: none;
 }
@@ -866,7 +808,7 @@ main { width: 100%; }
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 25% 30%, rgba(217, 184, 120, .08), transparent 45%),
+    radial-gradient(circle at 25% 30%, rgba(255,255,255,.10), transparent 45%),
     radial-gradient(circle at 75% 70%, var(--player-glow-soft), transparent 42%);
   transform: translate3d(0,0,0) scale(1);
   animation: whitePlaylistAmbient 18s ease-in-out infinite alternate;
@@ -904,7 +846,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 }
 .mini-like:active, .mini-play:active { transform: scale(.9); }
 .mini-like svg { width: 20px; height: 20px; }
-.mini-play { margin-left: 2px; border-radius: 50%; background: var(--gold-gradient); color: var(--accent-contrast); }
+.mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
 .mini-play svg { width: 19px; height: 19px; }
 
 /* FULL PLAYER */
@@ -933,19 +875,10 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   align-items: center;
   justify-content: center;
   border-radius: 28px 28px 0 0;
-  background: linear-gradient(180deg, #131110 0%, #0a0908 60%, #050504 100%);
+  background: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 60%, #070707 100%);
   position: relative;
   overflow: hidden;
   isolation: isolate;
-}
-
-.player::after {
-  content: "";
-  position: absolute;
-  top: 0; left: 14%; right: 14%;
-  height: 1px;
-  background: var(--gold-line);
-  z-index: 3;
 }
 
 
@@ -1001,7 +934,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   border-radius: var(--radius-xl);
   background: #151515;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-strong);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   position: relative;
   transition: transform var(--dur-slow) var(--ease);
@@ -1032,7 +965,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-cover svg { width: 62px; height: 62px; }
 
 .player-cover-symbol {
-  color: #e3c896; font-size: 120px; line-height: 1;
+  color: #fff; font-size: 120px; line-height: 1;
   font-family: "Times New Roman", "Noto Music", serif; font-weight: 400;
   transform: translateY(-4px);
   user-select: none;
@@ -1052,8 +985,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   min-width: 0; flex: 0 1 auto;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   text-align: center;
-  font-family: var(--font-display);
-  font-size: 27px; font-weight: 600; line-height: 32px;
+  font-size: 22px; font-weight: 800; line-height: 28px;
   transition: opacity 180ms var(--ease);
 }
 .player-title.identity-fade { opacity: 0; }
@@ -1129,7 +1061,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-lyrics-line[data-distance="0"] {
   font-size: 18px;
   line-height: 24px;
-  color: var(--accent-2);
   opacity: 1;
 }
 .player-lyrics-line[data-distance="1"] { opacity: .45; }
@@ -1193,7 +1124,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
    (loading/unavailable), via the [data-state] flag app.js sets. */
 .waveform-canvas[data-state="ready"] ~ #progress::-webkit-slider-runnable-track { background: transparent; }
 .waveform-canvas:not([data-state="ready"]) ~ #progress::-webkit-slider-runnable-track {
-  background: linear-gradient(to right, var(--accent) var(--fill), #2b2b2b var(--fill));
+  background: linear-gradient(to right, #fff var(--fill), #2b2b2b var(--fill));
 }
 
 #progress::-webkit-slider-runnable-track {
@@ -1212,7 +1143,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 
 #progress::-moz-range-track { height: 6px; background: #2b2b2b; border-radius: 20px; }
-#progress::-moz-range-progress { height: 6px; background: var(--accent); border-radius: 20px; }
+#progress::-moz-range-progress { height: 6px; background: #fff; border-radius: 20px; }
 #progress::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: transparent; }
 
 .time-row {
@@ -1263,9 +1194,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-controls .main-play {
   width: 68px; height: 68px;
   border-radius: 50%;
-  background: var(--gold-gradient);
-  color: var(--accent-contrast);
-  box-shadow: 0 12px 30px rgba(217, 184, 120, .32);
+  background: #fff;
+  color: #000;
+  box-shadow: 0 10px 26px rgba(255, 255, 255, .18);
 }
 .player-controls .main-play:active { transform: scale(.94); }
 .player-controls .main-play svg { width: 32px !important; height: 32px !important; fill: #000; stroke: none; }
@@ -1273,9 +1204,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 #shuffleButton, #previousButton, #nextButton, #playerLike { color: #fff; }
 
 #shuffleButton { color: #777 !important; }
-#shuffleButton.active { color: var(--accent) !important; transform: scale(1.04); }
+#shuffleButton.active { color: #fff !important; transform: scale(1.04); }
 
-#playerLike.active, .mini-like.active { color: var(--accent) !important; }
+#playerLike.active, .mini-like.active { color: #fff !important; }
 #playerLike.active svg, .mini-like.active svg { fill: currentColor !important; stroke: currentColor !important; }
 
 /* Shared icon stroke rules */
@@ -1321,22 +1252,12 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 .modal-card {
   width: 100%;
-  padding: 24px 22px 22px;
+  padding: 22px;
   border-radius: var(--radius-xl);
   background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   animation: sheetIn var(--dur-slow) var(--ease);
-  position: relative;
-  overflow: hidden;
-}
-
-.modal-card::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 16%; right: 16%;
-  height: 1px;
-  background: var(--gold-line);
 }
 
 @keyframes sheetIn {
@@ -1344,13 +1265,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.modal-card h2 {
-  margin: 0 0 18px;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  font-style: italic;
-}
+.modal-card h2 { margin: 0 0 18px; font-size: 20px; font-weight: 800; }
 
 /* Playlist cover picker (Create Playlist modal + detail header) */
 .playlist-cover-picker {
@@ -1409,7 +1324,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   height: 108px;
   margin: 0 auto 16px;
   border-radius: var(--radius-lg);
-  background: linear-gradient(150deg, #2e2717, #100e0a);
+  background: linear-gradient(150deg, #262433, #101010);
   color: var(--text-muted);
   display: flex;
   align-items: center;
@@ -1447,18 +1362,10 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   display: flex;
   align-items: flex-start;
   justify-content: space-around;
-  background: rgba(7, 6, 5, .9);
+  background: rgba(10, 10, 10, .9);
   border-top: 1px solid var(--border);
   backdrop-filter: blur(22px) saturate(150%);
   -webkit-backdrop-filter: blur(22px) saturate(150%);
-}
-
-.bottom-nav::before {
-  content: "";
-  position: absolute;
-  left: 18%; right: 18%; top: -1px;
-  height: 1px;
-  background: var(--gold-line);
 }
 
 .nav-item {
@@ -1474,7 +1381,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .nav-item span svg { width: 21px; height: 21px; }
 .nav-item small { margin-top: 5px; font-size: 10px; font-weight: 600; }
 
-.nav-item.active { color: var(--accent) !important; }
+.nav-item.active { color: #fff !important; }
 
 .nav-item svg { fill: none !important; stroke: currentColor !important; }
 
@@ -1502,7 +1409,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 .skeleton-block {
   border-radius: var(--radius-md);
-  background: linear-gradient(90deg, #121110 25%, #1e1a14 37%, #121110 63%);
+  background: linear-gradient(90deg, #131313 25%, #1c1c1c 37%, #131313 63%);
   background-size: 400% 100%;
   animation: homeSkeletonShimmer 1.4s ease infinite;
 }
@@ -1517,7 +1424,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   z-index: 120;
   pointer-events: none;
   background:
-    radial-gradient(circle at 20% 20%, rgba(217, 184, 120, .10), transparent 40%),
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,.12), transparent 40%),
     radial-gradient(circle at 80% 65%, var(--accent-glow-soft), transparent 38%);
   transform: translate3d(0,0,0) scale(1);
   animation: whitePlaylistAmbient 18s ease-in-out infinite alternate;
@@ -1532,7 +1439,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 /* RESPONSIVE */
 @media (min-width: 700px) {
-  body { max-width: 620px; margin: auto; background: #030302; }
+  body { max-width: 620px; margin: auto; background: #000; }
   #app { background: var(--bg); }
   .bottom-nav { left: 50%; right: auto; width: 620px; transform: translateX(-50%); }
   .mini-player { left: 50%; right: auto; width: 600px; transform: translateX(-50%); }
@@ -1552,6 +1459,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid rgba(217, 184, 120, .65);
+  outline: 2px solid rgba(255, 255, 255, .55);
   outline-offset: 2px;
 }
