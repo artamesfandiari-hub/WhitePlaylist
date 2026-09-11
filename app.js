@@ -3480,33 +3480,70 @@ function parseLRC(lrcText) {
 // of always laying out left-to-right.
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 
-// KEYWORD VIBE COLORING — a small curated word list per language.
-// classifyWordVibe() strips punctuation/case and checks it against
-// these; matches get tinted red (dark/negative vibe) or green
-// (hopeful/positive vibe) in renderLyricsLine() via
-// .player-lyrics-word--negative/--positive. Deliberately short and
-// unambiguous — most words are left plain so the coloring reads as
-// picking out a few loaded words, not tagging everything.
+// KEYWORD VIBE COLORING — a curated word list per language.
+// classifyWordVibe()/LYRICS_COLOR_WORDS strip punctuation/case and
+// check the word against these; matches get tinted red (dark/
+// negative — death, drugs, profanity, hate...), green (hopeful/
+// positive), or — for a literal color name — that exact color, via
+// .player-lyrics-word--negative/--positive or an inline style in
+// renderLyricsLine(). Most words stay plain white; only matches get
+// colored.
 const LYRICS_NEGATIVE_WORDS = new Set([
-  // English
-  "hate","pain","kill","killer","killed","death","dead","die","dying",
-  "blood","bleed","bleeding","burn","burning","cry","crying","tears",
-  "alone","lonely","broken","hurt","scar","scars","scared","fear",
+  // English — hate / dark feelings
+  "hate","pain","broken","hurt","scar","scars","scared","fear",
   "afraid","dark","darkness","evil","demon","devil","enemy","enemies",
-  "betray","betrayal","lie","lies","liar","war","fight","gun","knife",
-  "grave","poison","curse","cursed","rage","angry","anger","sad",
-  "sadness","sorrow","misery","suffer","suffering","wound","wounds",
-  "nightmare","hell","sin","shame","regret","loss","lost","cold",
-  "empty","void","scream","venom","toxic","ashes","ruin","ruined",
-  "destroy","destroyed","grief","mourn","revenge","hopeless","hopeless",
-  "trap","trapped","chains","prison","drown","drowning","numb","fake",
-  // Persian
-  "کینه","بغض","نفرت","درد","مرگ","مردن","خون","گریه","اشک","غم",
-  "غمگین","تنها","تنهایی","شکسته","زخم","ترس","تاریک","تاریکی",
-  "شیطان","دشمن","خیانت","دروغ","جنگ","اسلحه","چاقو","قبر","زهر",
-  "نفرین","خشم","عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم",
-  "پشیمون","پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا",
-  "انتقام","زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
+  "betray","betrayal","lie","lies","liar","war","fight","grave",
+  "curse","cursed","rage","angry","anger","sad","sadness","sorrow",
+  "misery","suffer","suffering","wound","wounds","nightmare","hell",
+  "sin","shame","regret","loss","lost","cold","empty","void","scream",
+  "venom","toxic","ashes","ruin","ruined","destroy","destroyed",
+  "grief","mourn","revenge","hopeless","trap","trapped","chains",
+  "prison","drown","drowning","numb","fake","cry","crying","tears",
+  "alone","lonely","blood","bleed","bleeding","burn","burning",
+  // English — death / killing (every common conjugation)
+  "die","died","dies","dying","kill","kills","killed","killing",
+  "killer","murder","murders","murdered","murderer","murdering",
+  "suicide","corpse","coffin","funeral","graveyard","deadly","lethal",
+  "execute","executed","execution","slain","slay","slays","slaughter",
+  "massacre","homicide","fatal","perish","perished","death","dead",
+  "gun","knife","stab","stabbed","shot","shoot","shooting","choke",
+  "choked","strangle","strangled","bury","buried",
+  // English — drugs / pills
+  "pill","pills","drug","drugs","xanax","molly","cocaine","coke",
+  "heroin","weed","meth","overdose","addict","addicted","addiction",
+  "syringe","needle","dope","narcotic","opioid","high","stoned",
+  // English — common profanity
+  "fuck","fucking","fucked","fucker","shit","bitch","ass","asshole",
+  "damn","bastard","slut","whore","dick","pussy","crap","hoe",
+  // Persian — hate / dark feelings
+  "کینه","بغض","نفرت","درد","خون","گریه","اشک","غم","غمگین","تنها",
+  "تنهایی","شکسته","زخم","ترس","تاریک","تاریکی","شیطان","دشمن",
+  "خیانت","دروغ","جنگ","اسلحه","چاقو","قبر","زهر","نفرین","خشم",
+  "عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم","پشیمون",
+  "پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا","انتقام",
+  "زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
+  // Persian — death / killing (all the conjugations that come up)
+  "مرگ","مردن","مردم","مردی","مرد","مردیم","مردید","مردند",
+  "می‌میرم","می‌میری","می‌میره","می‌میریم","می‌میرید","می‌میرند",
+  "میمیرم","میمیری","میمیره","میمیریم","میمیرید","میمیرند",
+  "نمی‌میرم","نمی‌میری","نمی‌میره","نمی‌میریم","نمی‌میرید","نمی‌میرند",
+  "نمیمیرم","نمیمیری","نمیمیره","نمیمیریم","نمیمیرید","نمیمیرند",
+  "بمیرم","بمیری","بمیره","بمیریم","بمیرید","بمیرند","بمیر",
+  "مرده","مردگان","کشتن","کشتم","کشتی","کشت","کشتیم","کشتید",
+  "کشتند","کشتمت","کشتمش","کشتنش","می‌کشمت","میکشمت",
+  "می‌کشم","می‌کشی","می‌کشه","می‌کشیم","می‌کشید","می‌کشند",
+  "میکشم","میکشی","میکشه","میکشیم","میکشید","میکشند",
+  "بکشم","بکشی","بکشه","بکشیم","بکشید","بکشند","بکش","بکشمت",
+  "کشته","قتل","قاتل","کشتار","خودکشی","جسد","تابوت","گورستان",
+  "قتل‌عام","اعدام",
+  // Persian — drugs / pills
+  "قرص","قرصا","قرص‌ها","مواد","موادمخدر","هروئین","تریاک",
+  "کوکائین","حشیش","شیشه","ماری‌جوانا","علف","دوپ","اوردوز",
+  "معتاد","اعتیاد","سرنگ","تزریق","نئشه","مسکن","مخدر",
+  // Persian — common profanity
+  "کیری","کص","کس‌کش","کسکش","جنده","عوضی","لعنتی","کثافت",
+  "آشغال","حروم‌زاده","حرومی","گوه","کونی","مادرجنده","ننه‌جنده",
+  "هرزه",
 ]);
 
 const LYRICS_POSITIVE_WORDS = new Set([
@@ -3518,24 +3555,63 @@ const LYRICS_POSITIVE_WORDS = new Set([
   "family","friend","friends","together","forever","rise","rising",
   "alive","life","soul","star","stars","sun","sunshine","bright",
   "glow","glory","victory","win","winning","strong","strength",
-  "gold","golden","heaven","angel","sweet","kind","kindness","gentle",
-  "safe","calm","proud","grateful","gratitude","beauty","magic",
+  "heaven","angel","sweet","kind","kindness","gentle","safe","calm",
+  "proud","grateful","gratitude","beauty","magic","success",
+  "successful","blossom","bloom","laugh","laughter","rescue",
+  "rescued","saved","salvation","truth","honest","loyalty","fly",
+  "flying","wings","rainbow","miracle",
   // Persian
   "عشق","امید","نور","شادی","خوشحال","لبخند","درخشیدن","آزاد",
   "آزادی","آرامش","شفا","رویا","زیبا","برکت","ایمان","اعتماد","گرم",
   "خانواده","دوست","باهم","همیشه","زندگی","روح","ستاره","خورشید",
-  "روشن","درخشش","افتخار","پیروزی","قوی","طلایی","بهشت","فرشته",
-  "مهربون","مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
+  "روشن","درخشش","افتخار","پیروزی","قوی","بهشت","فرشته","مهربون",
+  "مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
+  "خوشبختی","موفقیت","رهایی","نجات","بهار","گل","خنده","محبت",
+  "وفا","صداقت","تولد",
 ]);
+
+// Exact color names → the CSS color they should render as. Checked
+// before the negative/positive lists in renderLyricsLine(), so a
+// color word always wins and shows its own color rather than a vibe
+// tint. "black"/"مشکی"/"سیاه" and "خاکستری"/"gray" map to a lighter
+// gray instead of true black/dark gray since that'd be invisible
+// against this player's near-black background.
+const LYRICS_COLOR_WORDS = {
+  red: "#ef4444", blue: "#3b82f6", green: "#22c55e", yellow: "#eab308",
+  orange: "#f97316", purple: "#a855f7", pink: "#ec4899",
+  black: "#9ca3af", white: "#ffffff", gray: "#9ca3af", grey: "#9ca3af",
+  gold: "#fbbf24", golden: "#fbbf24", silver: "#cbd5e1",
+  brown: "#b45309", violet: "#8b5cf6", indigo: "#6366f1",
+  cyan: "#22d3ee", teal: "#14b8a6", maroon: "#f87171", navy: "#60a5fa",
+  crimson: "#dc2626", scarlet: "#dc2626", turquoise: "#2dd4bf",
+  lavender: "#c4b5fd", beige: "#d6c7a1", ivory: "#f5f0e6",
+  emerald: "#10b981", ruby: "#e11d48", amber: "#f59e0b",
+  coral: "#fb7185", magenta: "#d946ef", lime: "#84cc16",
+  olive: "#a3b325", bronze: "#b08d57", platinum: "#cbd5e1",
+  // Persian
+  "قرمز": "#ef4444", "آبی": "#3b82f6", "سبز": "#22c55e",
+  "زرد": "#eab308", "نارنجی": "#f97316", "بنفش": "#a855f7",
+  "صورتی": "#ec4899", "مشکی": "#9ca3af", "سیاه": "#9ca3af",
+  "سفید": "#ffffff", "خاکستری": "#9ca3af", "طلایی": "#fbbf24",
+  "طلائی": "#fbbf24", "نقره‌ای": "#cbd5e1", "قهوه‌ای": "#b45309",
+  "فیروزه‌ای": "#2dd4bf", "یاسی": "#c4b5fd", "کرم": "#d6c7a1",
+  "عاجی": "#f5f0e6", "زمرد": "#10b981", "زمردی": "#10b981",
+  "یاقوتی": "#e11d48", "کهربایی": "#f59e0b", "مرجانی": "#fb7185",
+  "سرخابی": "#d946ef", "لیمویی": "#84cc16", "زیتونی": "#a3b325",
+  "برنزی": "#b08d57", "سرمه‌ای": "#60a5fa",
+};
 
 // Strips punctuation/case for matching against the lists above, but
 // the original word (with its punctuation) is still what gets shown —
-// this only decides which color class it gets, never rewrites it.
-function classifyWordVibe(rawWord) {
-  const clean = rawWord.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-  if (!clean) return null;
-  if (LYRICS_NEGATIVE_WORDS.has(clean)) return "negative";
-  if (LYRICS_POSITIVE_WORDS.has(clean)) return "positive";
+// this only decides which color a word gets, never rewrites it.
+function normalizeLyricWord(rawWord) {
+  return rawWord.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function classifyWordVibe(cleanWord) {
+  if (!cleanWord) return null;
+  if (LYRICS_NEGATIVE_WORDS.has(cleanWord)) return "negative";
+  if (LYRICS_POSITIVE_WORDS.has(cleanWord)) return "positive";
   return null;
 }
 
@@ -3589,7 +3665,12 @@ function renderLyricsLine(index) {
 
   track.innerHTML = words
     .map((word, i) => {
-      const vibe = classifyWordVibe(word);
+      const clean = normalizeLyricWord(word);
+      const colorHex = LYRICS_COLOR_WORDS[clean];
+      if (colorHex) {
+        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
+      }
+      const vibe = classifyWordVibe(clean);
       const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
       return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
     })
