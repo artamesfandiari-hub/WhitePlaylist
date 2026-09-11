@@ -2720,7 +2720,7 @@ function formatTime(seconds) {
    ever downloaded/decoded once.
    ========================================================= */
 
-const WAVEFORM_BAR_COUNT = 64;
+const WAVEFORM_BAR_COUNT = 96;
 
 // song.id -> Array<number> peaks (0..1), in-memory for this session
 const waveformCache = new Map();
@@ -2925,7 +2925,7 @@ function drawWaveform(peaks) {
       : 0;
 
   const barCount = peaks.length;
-  const gap = 2 * dpr;
+  const gap = 1.5 * dpr;
   const barWidth =
     Math.max(1, (canvas.width - gap * (barCount - 1)) / barCount);
   const activeBars = Math.round((percent / 100) * barCount);
@@ -2936,10 +2936,15 @@ function drawWaveform(peaks) {
     const barHeight = amp * canvas.height;
     const x = i * (barWidth + gap);
 
+    // Unplayed bars stay a neutral, colorless gray; once a bar has
+    // been played it switches to the song's own dominant cover
+    // color (waveformActiveColor, kept in sync with the player's
+    // glow — see updatePlayerDynamicColor()), falling back to plain
+    // white for covers with no extractable color.
     ctx.fillStyle =
       i < activeBars
-        ? "rgba(255,255,255,.92)"
-        : "rgba(255,255,255,.24)";
+        ? waveformActiveColor
+        : "rgba(255,255,255,.16)";
 
     drawRoundedBar(ctx, x, midY - barHeight / 2, barWidth, barHeight, barWidth / 2);
   }
@@ -3004,9 +3009,15 @@ function stopWaveformAnim() {
    only — never on timeupdate — and is cached per song.
    ========================================================= */
 
-// song.id -> { glow, glowSoft }
+// song.id -> { glow, glowSoft, wave }
 const playerGlowCache = new Map();
 let lastGlowCoverUrl = undefined;
+
+// Solid color the waveform's played bars use — kept in step with
+// the player's ambient glow above so the whole player reads as one
+// per-song color, defaulting to plain white until a cover color has
+// been extracted (see applyPlayerGlow() / resetPlayerGlow()).
+let waveformActiveColor = "rgba(255,255,255,.92)";
 
 function updatePlayerDynamicColor(song) {
   if (!song) return;
@@ -3112,18 +3123,23 @@ function extractDominantColor(img) {
 
   return {
     glow: `rgba(${r}, ${g}, ${b}, .55)`,
-    glowSoft: `rgba(${r}, ${g}, ${b}, .18)`
+    glowSoft: `rgba(${r}, ${g}, ${b}, .18)`,
+    wave: `rgba(${r}, ${g}, ${b}, .95)`
   };
 }
 
 function applyPlayerGlow(colorPair) {
   document.documentElement.style.setProperty("--player-glow", colorPair.glow);
   document.documentElement.style.setProperty("--player-glow-soft", colorPair.glowSoft);
+  waveformActiveColor = colorPair.wave || "rgba(255,255,255,.92)";
+  redrawWaveformProgress();
 }
 
 function resetPlayerGlow() {
   document.documentElement.style.removeProperty("--player-glow");
   document.documentElement.style.removeProperty("--player-glow-soft");
+  waveformActiveColor = "rgba(255,255,255,.92)";
+  redrawWaveformProgress();
 }
 
 /* =========================================================
@@ -3459,6 +3475,24 @@ function renderLyrics(result) {
   });
 }
 
+// Scrolls the active line to the center of #lyricsBody by setting
+// that element's own scrollTop directly, instead of Element.
+// scrollIntoView(), which (even with a container that has
+// overscroll-behavior: contain) can still nudge ancestor scroll
+// containers on some WebKit builds. Touching only body.scrollTop
+// guarantees the close button / "Lyrics" title above it — and the
+// rest of the app behind the player — never move.
+function scrollLyricsLineIntoView(el, body) {
+  if (!el || !body) return;
+  const targetTop =
+    el.offsetTop - body.clientHeight / 2 + el.clientHeight / 2;
+
+  body.scrollTo({
+    top: Math.max(0, targetTop),
+    behavior: "smooth"
+  });
+}
+
 // Called from updateProgress() (the existing "timeupdate" handler) —
 // this does not add a new listener. No-ops immediately whenever the
 // panel is closed or this song has no synced lyrics loaded, so it
@@ -3495,7 +3529,7 @@ function updateLyricsSync() {
         const el = body.querySelector(`.lyrics-line[data-index="${index}"]`);
         if (el) {
           el.classList.add("active");
-          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          scrollLyricsLineIntoView(el, body);
         }
       }
     }

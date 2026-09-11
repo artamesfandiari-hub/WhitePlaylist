@@ -898,7 +898,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .lyrics-toggle.active { color: #fff; }
 
 .player-cover {
-  width: min(78vw, 340px, 32dvh);
+  width: min(86vw, 380px, 38dvh);
   aspect-ratio: 1;
   margin: 0 auto clamp(14px, 3.5dvh, 28px);
   border-radius: var(--radius-xl);
@@ -1058,7 +1058,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   align-items: center;
   justify-content: center;
   gap: 14px;
-  margin-top: clamp(12px, 3dvh, 25px);
+  margin-top: clamp(22px, 6dvh, 46px);
   position: relative;
   z-index: 10;
 }
@@ -1176,6 +1176,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   min-height: 0;
   margin-top: 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   mask-image: linear-gradient(180deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
