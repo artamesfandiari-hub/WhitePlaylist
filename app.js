@@ -2313,11 +2313,13 @@ function setupPlayer() {
   audio.addEventListener("play", () => {
     state.isPlaying = true;
     updatePlayButtons();
+    startWaveformAnim();
   });
 
   audio.addEventListener("pause", () => {
     state.isPlaying = false;
     updatePlayButtons();
+    stopWaveformAnim();
   });
 
   audio.addEventListener("timeupdate", updateProgress);
@@ -2840,6 +2842,15 @@ function loadWaveform(song) {
 function computeWaveformPeaks(audioBuffer, barCount) {
   const channel = audioBuffer.getChannelData(0);
   const samplesPerBar = Math.max(1, Math.floor(channel.length / barCount));
+
+  // For long tracks, samplesPerBar can be in the hundreds of
+  // thousands — scanning every sample in every bucket is what makes
+  // this block the main thread (felt as lag right when a song
+  // starts). A stride caps how many samples we actually look at per
+  // bar, independent of track length, while still taking the max
+  // within the bucket, so the shape stays the same.
+  const stride = Math.max(1, Math.floor(samplesPerBar / 300));
+
   const peaks = new Array(barCount).fill(0);
 
   for (let bar = 0; bar < barCount; bar++) {
@@ -2847,7 +2858,7 @@ function computeWaveformPeaks(audioBuffer, barCount) {
     const end = Math.min(start + samplesPerBar, channel.length);
 
     let max = 0;
-    for (let i = start; i < end; i++) {
+    for (let i = start; i < end; i += stride) {
       const v = Math.abs(channel[i]);
       if (v > max) max = v;
     }
@@ -2906,8 +2917,26 @@ function drawWaveform(peaks) {
         ? "rgba(255,255,255,.92)"
         : "rgba(255,255,255,.24)";
 
-    ctx.fillRect(x, midY - barHeight / 2, barWidth, barHeight);
+    drawRoundedBar(ctx, x, midY - barHeight / 2, barWidth, barHeight, barWidth / 2);
   }
+}
+
+// Pill-shaped bar (fully rounded ends) instead of a hard-edged
+// rectangle — purely visual, same position/size math as before.
+function drawRoundedBar(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  if (r <= 0) {
+    ctx.fillRect(x, y, width, height);
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // Called from the existing "timeupdate"/"input" handling — no new
@@ -2915,6 +2944,29 @@ function drawWaveform(peaks) {
 function redrawWaveformProgress() {
   if (lastWaveformPeaks) {
     drawWaveform(lastWaveformPeaks);
+  }
+}
+
+// "timeupdate" only fires a handful of times per second, which made
+// the played/unplayed split on the waveform visibly jump instead of
+// moving smoothly. This repaints on every animation frame while
+// audio is actually playing (still just a cheap repaint of already
+// computed peaks, no recompute), and stops as soon as it's not.
+let waveformAnimFrame = null;
+
+function startWaveformAnim() {
+  if (waveformAnimFrame) return;
+  const tick = () => {
+    redrawWaveformProgress();
+    waveformAnimFrame = requestAnimationFrame(tick);
+  };
+  waveformAnimFrame = requestAnimationFrame(tick);
+}
+
+function stopWaveformAnim() {
+  if (waveformAnimFrame) {
+    cancelAnimationFrame(waveformAnimFrame);
+    waveformAnimFrame = null;
   }
 }
 
