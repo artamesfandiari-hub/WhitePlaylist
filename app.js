@@ -695,7 +695,9 @@ function renderTopArtists() {
 
   container.querySelectorAll("[data-artist-id]").forEach(button => {
     button.addEventListener("click", () => {
-      openArtist(Number(button.dataset.artistId));
+      // Top Artists ids are the same opaque per-performer keys as
+      // the Artists tab now — don't coerce to a number.
+      openArtist(button.dataset.artistId);
     });
   });
 
@@ -759,6 +761,25 @@ function renderHomeFavorites() {
   showHomeSection("homeFavoritesSection", true);
 }
 
+// Mirrors worker.js's ARTIST_NAME_DELIMITER/splitArtistNames — a raw
+// credit string can pack multiple performers together ("A & B",
+// "A feat. B"). Used only to check whether a given performer is one
+// of them, e.g. matching a song's credit against a Top Artists entry
+// that may union several raw credits.
+const ARTIST_NAME_DELIMITER =
+  /\s*(?:&|\+|,|\/|\bfeaturing\b|\bfeat\.?\b|\bft\.?\b|\bvs\.?\b|\bwith\b|\bx\b)\s*/gi;
+
+function songCreditIncludesArtist(rawCredit, targetName) {
+  if (!rawCredit || !targetName) return false;
+
+  const target = String(targetName).trim().toLowerCase();
+
+  return String(rawCredit)
+    .split(ARTIST_NAME_DELIMITER)
+    .map(part => part.trim().toLowerCase())
+    .some(part => part === target);
+}
+
 /* PICKED FOR YOU — "Because You Listen To <top artist>", built
    only from real songs already in the library by the user's #1
    artist that haven't already shown up in Most Played / Recently
@@ -780,9 +801,15 @@ function renderHomeRecommendations() {
       .map(song => Number(song.id))
   );
 
+  // topArtist.id is now an opaque per-performer key (it can union
+  // several raw artist_id rows, e.g. solo credits plus features), so
+  // songs can no longer be matched by comparing artist_id numbers.
+  // Match by performer name instead — split on the same delimiters
+  // the backend uses (see ARTIST_NAME_DELIMITER in worker.js) so a
+  // song credited to "X feat. Y" still counts as one of X's songs.
   const songs = state.songs
     .filter(song =>
-      Number(song.artist_id) === Number(topArtist.id) &&
+      songCreditIncludesArtist(song.artist, topArtist.name) &&
       !alreadySurfacedIds.has(Number(song.id))
     )
     .slice(0, 8);
@@ -1215,7 +1242,9 @@ function renderAlbums() {
 
   container.querySelectorAll("[data-album-id]").forEach(button => {
     button.addEventListener("click", () => {
-      openAlbum(Number(button.dataset.albumId));
+      // album.id is now an opaque key (like artist.id), not
+      // necessarily numeric — don't coerce it.
+      openAlbum(button.dataset.albumId);
     });
   });
 }
