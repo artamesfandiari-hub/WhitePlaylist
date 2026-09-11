@@ -47,11 +47,19 @@ svg { display: block; overflow: visible; }
   --surface: #111111;
   --surface-2: #161616;
   --surface-3: #1d1d1d;
-  --surface-glass: rgba(18, 18, 18, .78);
+  --surface-glass: rgba(20, 20, 20, .58);
   --surface-glass-strong: rgba(15, 15, 15, .92);
 
   --border: rgba(255, 255, 255, .07);
   --border-strong: rgba(255, 255, 255, .13);
+
+  /* Liquid-glass surface kit — a translucent fill + a bright top
+     "rim" line (the light-catching edge every iOS 26 glass panel
+     has) so any card can read as glass instead of flat plastic. */
+  --glass-fill: rgba(255, 255, 255, .055);
+  --glass-fill-active: rgba(255, 255, 255, .095);
+  --glass-blur: blur(26px) saturate(180%);
+  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, .18), inset 0 -1px 0 rgba(255, 255, 255, .03);
 
   --text: #f6f6f6;
   --text-secondary: #9a9a9a;
@@ -163,10 +171,11 @@ main { width: 100%; }
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, .06);
+  background: var(--glass-fill);
   border: 1px solid var(--border-strong);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-rim);
   color: var(--text);
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
@@ -403,13 +412,16 @@ main { width: 100%; }
   align-items: center;
   padding: 13px;
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-rim);
   text-align: left;
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-.library-item:active { transform: scale(.985); background: var(--surface-2); }
+.library-item:active { transform: scale(.985); background: var(--glass-fill-active); }
 
 .library-icon {
   width: 48px;
@@ -523,12 +535,12 @@ main { width: 100%; }
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, .08);
+  background: var(--glass-fill-active);
   border: 1px solid var(--border-strong);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: #fff;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), var(--glass-rim);
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
 .add-button:active { transform: scale(.9); background: rgba(255, 255, 255, .14); }
@@ -544,13 +556,14 @@ main { width: 100%; }
 .primary-button { background: #fff; color: #000; }
 .primary-button:active, .secondary-button:active { transform: scale(.97); }
 .secondary-button {
-  background: rgba(255, 255, 255, .06);
+  background: var(--glass-fill);
   border: 1px solid var(--border-strong);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-rim);
   color: #fff;
 }
-.secondary-button:active { background: rgba(255, 255, 255, .1); }
+.secondary-button:active { background: var(--glass-fill-active); }
 .full-button { width: 100%; margin-top: 12px; }
 
 /* Plain, unclassed buttons inside modal actions (e.g. the confirm
@@ -561,16 +574,17 @@ main { width: 100%; }
   padding: 0 18px;
   border-radius: var(--radius-sm);
   font-weight: 700;
-  background: rgba(255, 255, 255, .06);
+  background: var(--glass-fill);
   border: 1px solid var(--border-strong);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-rim);
   color: #fff;
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
 .modal-actions button:not(.primary-button):not(.secondary-button):active {
   transform: scale(.97);
-  background: rgba(255, 255, 255, .1);
+  background: var(--glass-fill-active);
 }
 
 /* HOME DASHBOARD */
@@ -623,12 +637,26 @@ main { width: 100%; }
   display: flex;
   align-items: center;
   gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 14px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(165deg, #171717 0%, #101010 100%);
+  background: linear-gradient(165deg, var(--glass-fill-active) 0%, var(--glass-fill) 100%);
   border: 1px solid var(--border-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sm), var(--glass-rim);
   position: relative;
   overflow: hidden;
+}
+.continue-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,.10), transparent 55%);
+  pointer-events: none;
 }
 .continue-card:active { transform: scale(.985); }
 
@@ -638,37 +666,60 @@ main { width: 100%; }
   background: linear-gradient(150deg, #2a2a2a, #101010);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); overflow: hidden; position: relative;
+  z-index: 1;
 }
 
-.continue-info { min-width: 0; flex: 1; text-align: left; }
+/* min-width:0 lets this flex child shrink below its content's
+   natural width; flex:1 with an explicit min-width is what makes
+   the ellipsis rules below actually take effect instead of the
+   title stretching the whole card wider than the screen. */
+.continue-info { min-width: 0; max-width: 100%; flex: 1 1 auto; text-align: left; overflow: hidden; position: relative; z-index: 1; }
 
 .continue-label {
   color: #999; font-size: 11px; font-weight: 650;
   letter-spacing: .4px; text-transform: uppercase; margin-bottom: 4px;
 }
 
-.continue-title { font-size: 15.5px; font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.continue-artist { margin-top: 3px; color: #888; font-size: 12.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.continue-title {
+  max-width: 100%;
+  font-size: 15.5px; font-weight: 700;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.continue-artist {
+  max-width: 100%;
+  margin-top: 3px; color: #888; font-size: 12.5px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 
 .continue-play {
   flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
   background: #fff; color: #000;
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 1;
 }
 .continue-play svg { width: 20px; height: 20px; fill: currentColor; stroke: none; margin-left: 2px; }
+/* When playing, app.js swaps in ICONS.pause (two bars, centered) —
+   drop the play triangle's optical-centering offset so the pause
+   icon sits dead-center in the same fixed 46px circle. */
+.continue-play.is-pause svg { margin-left: 0; }
 
 /* SMART MIX */
 .smart-mix-card {
   width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 18px 18px 18px 20px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, #242424 0%, #131313 65%, #0d0d0d 100%);
+  background: linear-gradient(135deg, var(--glass-fill-active) 0%, var(--glass-fill) 65%, var(--glass-fill) 100%);
   border: 1px solid var(--border-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-rim);
   text-align: left;
   position: relative;
   overflow: hidden;
@@ -794,9 +845,9 @@ main { width: 100%; }
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-glass);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  box-shadow: var(--shadow-md);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-md), var(--glass-rim);
   overflow: hidden;
   transition: box-shadow var(--dur) var(--ease);
 }
@@ -1308,11 +1359,14 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 .modal-card {
   width: 100%;
+  box-sizing: border-box;
   padding: 22px;
   border-radius: var(--radius-xl);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  background: var(--surface-glass-strong);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-lg), var(--glass-rim);
   animation: sheetIn var(--dur-slow) var(--ease);
 }
 
@@ -1418,10 +1472,11 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   display: flex;
   align-items: flex-start;
   justify-content: space-around;
-  background: rgba(10, 10, 10, .9);
+  background: rgba(10, 10, 10, .68);
   border-top: 1px solid var(--border);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
 }
 
 .nav-item {

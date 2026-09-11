@@ -615,6 +615,28 @@ function renderContinueListening() {
 
   bindSongButtons(container, state.recentlyPlayed);
   showHomeSection("continueListeningSection", true);
+  updateContinueCardPlayState();
+}
+
+/* Keeps the Continue Listening button's icon in sync with real
+   playback: shows pause only while its own song is the one actually
+   playing, play otherwise (including when it's the current song but
+   paused). Safe to call any time — no-ops if the card isn't rendered. */
+function updateContinueCardPlayState() {
+  const card = document.querySelector("#continueListeningCard .continue-card");
+  if (!card) return;
+
+  const playSpan = card.querySelector(".continue-play");
+  if (!playSpan) return;
+
+  const isThisSong =
+    !!state.currentSong &&
+    Number(state.currentSong.id) === Number(card.dataset.id);
+
+  const showPause = isThisSong && state.isPlaying;
+
+  playSpan.innerHTML = showPause ? ICONS.pause : ICONS.play;
+  playSpan.classList.toggle("is-pause", showPause);
 }
 
 /* RECENTLY PLAYED — real listening history (skips the first item,
@@ -2683,6 +2705,8 @@ function updatePlayButtons() {
   // Visual-only hook (CSS reads this class for the subtle cover
   // animation + mini player state). Does not affect audio/state logic.
   document.body.classList.toggle("is-playing", state.isPlaying);
+
+  updateContinueCardPlayState();
 }
 
 // Visual-only: marks whichever rendered song-item(s) match the
