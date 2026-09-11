@@ -1023,27 +1023,51 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 .player-lyrics::-webkit-scrollbar { display: none; }
 
+/* Static spotlight sitting at dead-center of the box — the active
+   line is always scrolled to this point (see scrollLyricsToActive()
+   in app.js), so this glow never needs to move; it just quietly
+   marks "this is the line that matters" without adding any motion
+   of its own. Sits behind the text (z-index 0), never intercepts
+   taps (pointer-events: none). */
+.player-lyrics::before {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 38px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: radial-gradient(60% 100% at 50% 50%, var(--player-glow-soft), transparent 72%);
+  pointer-events: none;
+  z-index: 0;
+}
+
 .player-lyrics-track {
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   /* Top/bottom padding roughly half the viewport height so the
      first and last lines can still be scrolled to dead center. */
   padding: 44px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .player-lyrics-line {
   width: 100%;
   max-width: 100%;
   padding: 3px 20px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 650;
   line-height: 20px;
   text-align: center;
   color: #fff;
-  opacity: .18;
+  opacity: .16;
+  transform: scale(.96);
+  filter: blur(.6px);
   /* No more clipped "…" on long lines — if a line still doesn't
      fit after the auto-shrink app.js applies to the active line,
      it scrolls horizontally on its own instead of truncating. */
@@ -1053,18 +1077,40 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: pointer;
-  transition: opacity var(--dur) var(--ease), font-size var(--dur) var(--ease);
+  transition: opacity var(--dur-slow) var(--ease), font-size var(--dur-slow) var(--ease),
+              transform var(--dur-slow) var(--ease), filter var(--dur-slow) var(--ease),
+              letter-spacing var(--dur-slow) var(--ease), text-shadow var(--dur-slow) var(--ease);
 }
 .player-lyrics-line::-webkit-scrollbar { display: none; }
-.player-lyrics-line:active { transform: scale(.98); }
+.player-lyrics-line:active { transform: scale(.94); }
 
+.player-lyrics-line[data-distance="1"] { opacity: .42; transform: scale(.98); filter: blur(.3px); }
+.player-lyrics-line[data-distance="2"] { opacity: .2; transform: scale(.97); filter: blur(.5px); }
+
+/* The active line: a touch larger, fully sharp, faintly lit by the
+   spotlight above it — and it eases up into place rather than just
+   snapping to its new opacity, so every line change reads as a
+   small, deliberate entrance instead of a flicker. */
 .player-lyrics-line[data-distance="0"] {
   font-size: 18px;
   line-height: 24px;
+  letter-spacing: .1px;
+  color: #fff;
   opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  text-shadow: 0 0 20px var(--player-glow-soft);
+  animation: lyricRiseIn 480ms var(--ease);
 }
-.player-lyrics-line[data-distance="1"] { opacity: .45; }
-.player-lyrics-line[data-distance="2"] { opacity: .22; }
+
+@keyframes lyricRiseIn {
+  from { opacity: .4; transform: scale(.93) translateY(5px); filter: blur(2px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-lyrics-line[data-distance="0"] { animation: none; }
+}
 
 .player-lyrics-status {
   width: 100%;
