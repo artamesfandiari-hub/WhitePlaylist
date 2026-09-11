@@ -1026,7 +1026,7 @@ function findSong(id) {
 /* =========================================================
    DISCOVER (public music)
    A second, fully separate catalog inside the app: public songs
-   posted to the configured Telegram group, shared identically to
+   posted to the bot in any Telegram group, shared identically to
    every user (never filtered per-viewer — see GET /group-songs on
    the backend). Kept strictly apart from the personal library above:
    these songs are never auto-added to Songs/Favorites/Smart
@@ -1043,13 +1043,9 @@ async function loadDiscoverSongs() {
 
     state.discoverSongs = markPublic(data.songs);
 
-    renderDiscoverHome();
     renderDiscoverList(state.discoverSongs);
   } catch (error) {
     console.error("Discover:", error);
-
-    const meta = document.getElementById("discoverHomeMeta");
-    if (meta) meta.textContent = "Couldn't load";
 
     showError("discoverList", "Couldn't load public tracks.");
   }
@@ -1060,18 +1056,6 @@ async function loadDiscoverSongs() {
 // server sent — a plain client-side marker, never persisted.
 function markPublic(songs) {
   return (songs || []).map(song => ({ ...song, _public: true }));
-}
-
-function renderDiscoverHome() {
-  const meta = document.getElementById("discoverHomeMeta");
-  if (!meta) return;
-
-  const count = state.discoverSongs.length;
-
-  meta.textContent =
-    count
-      ? `${count} public track${count === 1 ? "" : "s"}`
-      : "No public tracks yet";
 }
 
 // Renders whichever song list is currently active on the Discover
@@ -1209,17 +1193,15 @@ async function addSongToLibrary(song, button) {
 
 /* =========================================================
    DISCOVER NAVIGATION + SEARCH
-   (a separate real page/view, not an expanded Home section — see
-   #discoverPage in index.html. Its search box queries only the
-   public catalog via GET /group-songs?q=..., completely separate
-   from the personal search() function/searchPage above.)
+   (a real top-level page/view of its own, reached via its own
+   bottom-nav tab like Songs/Favorites/Artists — see #discoverPage
+   in index.html and the generic nav-item handling in
+   setupNavigation(). Its search box queries only the public
+   catalog via GET /group-songs?q=..., completely separate from the
+   personal search() function/searchPage above.)
    ========================================================= */
 
 function setupDiscoverNavigation() {
-  document
-    .getElementById("discoverHomeCard")
-    ?.addEventListener("click", () => showPage("discoverPage"));
-
   setupDiscoverSearch();
 }
 
@@ -2668,9 +2650,97 @@ function setupPlayer() {
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
 
+  setupPlaybackRecovery();
+
   // Waveform canvas is sized off its own rendered box, so it needs a
   // repaint (not a recompute) whenever the layout changes.
   window.addEventListener("resize", redrawWaveformProgress);
+}
+
+// Two separate glitches that both showed up to users as "the sound
+// just cuts off/pauses for no reason":
+//
+// 1. The audio comes from streamSong() on the Worker, which itself
+//    proxies the bytes live from Telegram's file servers. On a shaky
+//    mobile connection that upstream fetch can stall mid-buffer; the
+//    <audio> element then just sits there "waiting" forever with no
+//    built-in retry, so playback silently never resumes.
+// 2. Telegram suspends a Mini App's WebView (and anything it's
+//    doing, including an in-flight audio fetch) whenever the app is
+//    minimized/backgrounded — e.g. the user switches to another chat
+//    or the screen locks — and does not resume it automatically when
+//    the app is foregrounded again, even though nothing ever fired a
+//    normal "pause" event to say so.
+//
+// Both are handled the same way: notice the audio element isn't
+// actually advancing when it should be, and kick it back into a
+// working state by reloading the current track from where it left
+// off and resuming playback.
+let stallRecoveryTimer = null;
+
+function scheduleStallRecovery() {
+  if (stallRecoveryTimer) return; // a recovery attempt is already queued
+
+  stallRecoveryTimer = setTimeout(() => {
+    stallRecoveryTimer = null;
+    recoverStalledPlayback();
+  }, 4000);
+}
+
+function cancelStallRecovery() {
+  if (!stallRecoveryTimer) return;
+  clearTimeout(stallRecoveryTimer);
+  stallRecoveryTimer = null;
+}
+
+// Reloads the currently loaded track from its exact last position
+// and resumes — used when the stream stalls/errors instead of
+// leaving the player stuck silent. No-ops if playback already
+// recovered (or moved on) by the time the timer fires.
+function recoverStalledPlayback() {
+  if (!state.currentSong || !state.isPlaying) return;
+  if (!audio.paused && audio.readyState > 2) return;
+
+  const resumeAt = audio.currentTime || 0;
+  const src = audio.src;
+  if (!src) return;
+
+  const onReady = () => {
+    audio.removeEventListener("loadedmetadata", onReady);
+    audio.currentTime = resumeAt;
+    audio.play().catch(console.error);
+  };
+
+  audio.addEventListener("loadedmetadata", onReady);
+
+  audio.src = src;
+  audio.load();
+}
+
+function setupPlaybackRecovery() {
+  audio.addEventListener("waiting", scheduleStallRecovery);
+  audio.addEventListener("stalled", scheduleStallRecovery);
+  audio.addEventListener("playing", cancelStallRecovery);
+  audio.addEventListener("canplay", cancelStallRecovery);
+
+  audio.addEventListener("error", () => {
+    console.error("Audio element error:", audio.error);
+    scheduleStallRecovery();
+  });
+
+  // Resync reality after the Mini App comes back to the foreground:
+  // if we still think we should be playing but the element is
+  // actually paused/stuck, kick playback back into gear.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (!state.isPlaying || !state.currentSong) return;
+
+    if (audio.paused) {
+      audio.play().catch(console.error);
+    } else if (audio.readyState <= 2) {
+      recoverStalledPlayback();
+    }
+  });
 }
 
 // contextList is the list the song was selected from (e.g. the

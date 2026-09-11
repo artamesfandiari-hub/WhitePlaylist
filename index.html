@@ -186,39 +186,6 @@
           <div class="hscroll" id="homeRecommendationsList"></div>
         </div>
 
-        <!-- DISCOVER (public music shared by everyone — a separate
-             catalog from the personal library above; see
-             discoverHomeCard's click handler / discoverPage below) -->
-        <div class="home-section" id="discoverHomeSection">
-          <div class="section-heading">
-            <h2>Discover</h2>
-          </div>
-
-          <button
-            class="library-item"
-            id="discoverHomeCard"
-            type="button"
-          >
-            <div class="library-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
-              </svg>
-            </div>
-
-            <div class="library-info">
-              <div class="library-name">Public Music</div>
-              <div class="library-meta" id="discoverHomeMeta">Loading…</div>
-            </div>
-
-            <div class="library-arrow">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <polyline points="9 5 16 12 9 19"></polyline>
-              </svg>
-            </div>
-          </button>
-        </div>
-
         <!-- RECENTLY ADDED (existing, moved lower) -->
         <div class="home-section">
           <div class="section-heading">
@@ -268,9 +235,10 @@
       </section>
 
       <!-- DISCOVER (public music page — a distinct catalog view,
-           separate from the personal Songs/Search above. Reuses the
-           same song-item rows and the existing audio/player system;
-           the only difference per row is "Add to Library" instead of
+           separate from the personal Songs/Search above, reached
+           directly from its own bottom-nav tab. Reuses the same
+           song-item rows and the existing audio/player system; the
+           only difference per row is "Add to Library" instead of
            the personal ⋯ menu, since these songs aren't owned by the
            viewer. See loadDiscoverSongs()/discoverSongHTML() in
            app.js.) -->
@@ -278,16 +246,6 @@
         class="page"
         id="discoverPage"
       >
-        <button
-          class="back-button"
-          data-back="homePage"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <polyline points="15 5 8 12 15 19"></polyline>
-          </svg>
-          <span>Home</span>
-        </button>
-
         <div class="page-title-row">
           <h1>Discover</h1>
         </div>
@@ -911,6 +869,19 @@
           </svg>
         </span>
         <small>Home</small>
+      </button>
+
+      <button
+        class="nav-item"
+        data-page="discoverPage"
+      >
+        <span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+          </svg>
+        </span>
+        <small>Discover</small>
       </button>
 
       <button
