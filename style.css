@@ -912,19 +912,18 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-close:active { transform: translateX(-8px) scale(.9); color: #fff; }
 .player-close svg { width: 21px; height: 21px; }
 
-.lyrics-toggle {
+.player-menu-btn {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
   transform: translateX(8px);
   transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
 }
-.lyrics-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.lyrics-toggle:active { transform: translateX(8px) scale(.9); }
-.lyrics-toggle.active { color: #fff; }
+.player-menu-btn svg { width: 20px; height: 20px; }
+.player-menu-btn:active { transform: translateX(8px) scale(.9); color: #fff; }
 
 .player-cover {
-  width: min(86vw, 380px, 38dvh);
+  width: min(86vw, 380px, 32dvh);
   aspect-ratio: 1;
   margin: 0 auto clamp(14px, 3.5dvh, 28px);
   border-radius: var(--radius-xl);
@@ -996,6 +995,63 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   transition: opacity 180ms var(--ease);
 }
 .player-artist.identity-fade { opacity: 0; }
+
+/* INLINE LYRICS TICKER — always part of the player layout (no
+   button/panel needed). Shows the active line plus two lines of
+   context on each side, faded further the farther they are from
+   what's currently playing. Tapping any visible line seeks to it,
+   same as the waveform/progress bar. */
+.player-lyrics {
+  width: 100%;
+  height: 92px;
+  margin-top: clamp(8px, 2dvh, 18px);
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(180deg, transparent 0, #000 20%, #000 80%, transparent 100%);
+}
+
+.player-lyrics-track {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.player-lyrics-line {
+  width: 100%;
+  max-width: 100%;
+  padding: 2px 16px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: opacity var(--dur) var(--ease), font-size var(--dur) var(--ease);
+}
+.player-lyrics-line:active { transform: scale(.98); }
+
+.player-lyrics-line[data-distance="0"] {
+  font-size: 16px;
+  line-height: 22px;
+  opacity: 1;
+}
+.player-lyrics-line[data-distance="1"] { opacity: .45; }
+.player-lyrics-line[data-distance="2"] { opacity: .18; }
+
+.player-lyrics-status {
+  width: 100%;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
 
 /* PROGRESS + WAVEFORM — two separate visual layers sharing one hit
    area. The waveform canvas (real amplitude bars, drawn by
@@ -1155,91 +1211,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-close:active, .song-actions button:active, .player-controls button:active {
   transform: scale(.96);
 }
-
-/* LYRICS PANEL — slides over the full player content; the mini
-   player, progress bar and playback controls underneath keep
-   working exactly as before (the panel is purely an overlay, it
-   never unmounts or replaces any player markup). */
-.lyrics-panel {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  padding: calc(20px + env(safe-area-inset-top)) 20px calc(25px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, #101010 0%, #0a0a0a 60%, #070707 100%);
-  border-radius: 28px 28px 0 0;
-  opacity: 1;
-  transition: opacity var(--dur-slow) var(--ease);
-}
-
-.lyrics-panel.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.lyrics-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.lyrics-close {
-  width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
-  color: #888;
-  transition: color var(--dur) var(--ease);
-}
-.lyrics-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.lyrics-close:active { color: #fff; }
-
-.lyrics-body {
-  flex: 1;
-  min-height: 0;
-  margin-top: 18px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  mask-image: linear-gradient(180deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
-}
-.lyrics-body::-webkit-scrollbar { display: none; }
-
-.lyrics-status {
-  color: var(--text-muted);
-  font-size: 14px;
-  text-align: center;
-  padding: 40px 12px;
-}
-
-.lyrics-line {
-  padding: 10px 4px;
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 1.5;
-  color: var(--text-muted);
-  text-align: center;
-  cursor: pointer;
-  transition: color var(--dur) var(--ease), transform var(--dur) var(--ease);
-}
-.lyrics-line:active { transform: scale(.98); }
-
-.lyrics-line.active {
-  color: #fff;
-  transform: scale(1.02);
-}
-
-/* Karaoke word-level highlight (only rendered when LRCLIB provides
-   word timestamps — see parseLRC() in app.js). Plain line-level
-   lyrics never get this markup. Upcoming words in the active line
-   sit dim; each word brightens the instant it's sung. */
-.lyrics-word { transition: color var(--dur-fast) linear; }
-.lyrics-line.active .lyrics-word { color: rgba(255, 255, 255, .4); }
-.lyrics-line.active .lyrics-word.sung { color: #fff; }
 
 /* ---------- 8. MODALS & BOTTOM SHEETS ---------- */
 .modal {

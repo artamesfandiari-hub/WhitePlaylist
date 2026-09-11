@@ -601,15 +601,14 @@
           </button>
 
           <button
-            class="lyrics-toggle"
-            id="lyricsButton"
-            aria-label="Lyrics"
-            aria-pressed="false"
+            class="player-menu-btn"
+            id="playerMenuButton"
+            aria-label="Track options"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 5h16"></path>
-              <path d="M4 11h16"></path>
-              <path d="M4 17h10"></path>
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none;">
+              <circle cx="5" cy="12" r="2"></circle>
+              <circle cx="12" cy="12" r="2"></circle>
+              <circle cx="19" cy="12" r="2"></circle>
             </svg>
           </button>
         </div>
@@ -638,6 +637,14 @@
           id="playerArtist"
         >
           —
+        </div>
+
+        <!-- Inline lyrics ticker: always part of the player layout
+             (no separate panel/button needed). Shows the current
+             line plus a couple of lines before/after it, faded by
+             distance — see #playerLyricsTrack in app.js. -->
+        <div class="player-lyrics" id="playerLyrics">
+          <div class="player-lyrics-track" id="playerLyricsTrack"></div>
         </div>
 
         <div class="player-progress-wrap" id="playerProgressWrap">
@@ -715,23 +722,6 @@
             </svg>
           </button>
 
-        </div>
-
-        <div class="lyrics-panel hidden" id="lyricsPanel">
-          <div class="lyrics-header">
-            <span>Lyrics</span>
-            <button
-              class="lyrics-close"
-              id="lyricsClose"
-              aria-label="Close lyrics"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-              </svg>
-            </button>
-          </div>
-          <div class="lyrics-body" id="lyricsBody"></div>
         </div>
 
       </div>

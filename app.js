@@ -2303,6 +2303,14 @@ function setupPlayer() {
     .addEventListener("click", closeFullPlayer);
 
   document
+    .getElementById("playerMenuButton")
+    .addEventListener("click", () => {
+      if (state.currentSong) {
+        openSongActionsMenu(state.currentSong);
+      }
+    });
+
+  document
     .getElementById("mainPlay")
     .addEventListener("click", togglePlay);
 
@@ -2362,8 +2370,6 @@ function setupPlayer() {
   // Waveform canvas is sized off its own rendered box, so it needs a
   // repaint (not a recompute) whenever the layout changes.
   window.addEventListener("resize", redrawWaveformProgress);
-
-  setupLyrics();
 }
 
 // contextList is the list the song was selected from (e.g. the
@@ -2607,10 +2613,7 @@ function updatePlayerUI() {
   // that's already cached for this song.
   updatePlayerDynamicColor(song);
   loadWaveform(song);
-
-  if (lyricsPanelOpen) {
-    loadLyrics(song);
-  }
+  loadLyrics(song);
 }
 
 function updatePlayerLike() {
@@ -2690,7 +2693,6 @@ function openFullPlayer() {
 
 function closeFullPlayer() {
   playerOverlay.classList.add("hidden");
-  closeLyricsPanel();
 }
 
 // Visual-only: paints the portion of the track already played.
@@ -3190,56 +3192,7 @@ const LYRICS_API = "https://lrclib.net/api";
 const lyricsCache = new Map();
 
 let lyricsRequestToken = 0;
-let lyricsPanelOpen = false;
 let activeLyricsLineIndex = -1;
-
-function setupLyrics() {
-  document
-    .getElementById("lyricsButton")
-    .addEventListener("click", toggleLyricsPanel);
-
-  document
-    .getElementById("lyricsClose")
-    .addEventListener("click", closeLyricsPanel);
-}
-
-function toggleLyricsPanel() {
-  if (lyricsPanelOpen) {
-    closeLyricsPanel();
-  } else {
-    openLyricsPanel();
-  }
-}
-
-function openLyricsPanel() {
-  if (!state.currentSong) return;
-
-  lyricsPanelOpen = true;
-
-  const panel = document.getElementById("lyricsPanel");
-  const button = document.getElementById("lyricsButton");
-
-  if (panel) panel.classList.remove("hidden");
-  if (button) {
-    button.classList.add("active");
-    button.setAttribute("aria-pressed", "true");
-  }
-
-  loadLyrics(state.currentSong);
-}
-
-function closeLyricsPanel() {
-  lyricsPanelOpen = false;
-
-  const panel = document.getElementById("lyricsPanel");
-  const button = document.getElementById("lyricsButton");
-
-  if (panel) panel.classList.add("hidden");
-  if (button) {
-    button.classList.remove("active");
-    button.setAttribute("aria-pressed", "false");
-  }
-}
 
 function lyricsStorageKey(songId) {
   return `wp_lrc_${songId}`;
@@ -3271,19 +3224,22 @@ function saveLyricsToStorage(songId, result) {
   }
 }
 
-// Fetches (or retrieves cached) lyrics for `song` and renders them.
-// Only ever called when the lyrics panel is open for this song, so
-// no lyrics API calls happen while the panel is closed.
+// Fetches (or retrieves cached) lyrics for `song` and renders them
+// into the inline player lyrics ticker. Called whenever the full
+// player loads a song (see updatePlayerUI()), since the ticker is
+// always part of the player layout now — no panel to open.
 function loadLyrics(song) {
   if (!song || song.id == null) return;
 
   const token = ++lyricsRequestToken;
-  const body = document.getElementById("lyricsBody");
-  if (!body) return;
+  const track = document.getElementById("playerLyricsTrack");
+  if (!track) return;
+
+  activeLyricsLineIndex = -1;
 
   const cached = lyricsCache.get(song.id);
   if (cached) {
-    renderLyrics(cached);
+    renderPlayerLyricsTicker(cached, -1);
     return;
   }
 
@@ -3297,20 +3253,20 @@ function loadLyrics(song) {
 
   if (stored) {
     lyricsCache.set(song.id, stored);
-    renderLyrics(stored);
+    renderPlayerLyricsTicker(stored, -1);
     return;
   }
 
-  body.innerHTML = `<div class="lyrics-status">Loading lyrics…</div>`;
+  track.innerHTML = `<div class="player-lyrics-status">Loading lyrics…</div>`;
 
   fetchLyricsFromLRCLIB(song)
     .then(result => {
-      if (token !== lyricsRequestToken) return; // song/panel changed meanwhile
+      if (token !== lyricsRequestToken) return; // song changed meanwhile
 
       lyricsCache.set(song.id, result);
       saveLyricsToStorage(song.id, result);
 
-      renderLyrics(result);
+      renderPlayerLyricsTicker(result, activeLyricsLineIndex);
     })
     .catch(error => {
       console.error("Lyrics:", error);
@@ -3318,7 +3274,7 @@ function loadLyrics(song) {
 
       const result = { lines: [], unavailable: true };
       lyricsCache.set(song.id, result);
-      renderLyrics(result);
+      renderPlayerLyricsTicker(result, -1);
     });
 }
 
@@ -3460,15 +3416,20 @@ function parseLRC(lrcText) {
   return lines;
 }
 
-function renderLyrics(result) {
-  const body = document.getElementById("lyricsBody");
-  if (!body) return;
-
-  activeLyricsLineIndex = -1;
+// Renders the inline lyrics ticker: the active line (distance 0)
+// plus up to two lines of context on each side, faded further the
+// farther they sit from what's currently playing (see the
+// .player-lyrics-line[data-distance] rules in style.css). Called
+// whenever lyrics data first loads for a song (activeIndex -1, no
+// line highlighted yet) and again every time updateLyricsSync()
+// below detects the active line has changed.
+function renderPlayerLyricsTicker(result, activeIndex) {
+  const track = document.getElementById("playerLyricsTrack");
+  if (!track) return;
 
   if (!result || result.unavailable || !result.lines.length) {
-    body.innerHTML = `
-      <div class="lyrics-status">
+    track.innerHTML = `
+      <div class="player-lyrics-status">
         ${
           result && result.instrumental
             ? "This track is instrumental."
@@ -3479,27 +3440,37 @@ function renderLyrics(result) {
     return;
   }
 
-  body.innerHTML = result.lines
-    .map((line, index) => `
-      <div class="lyrics-line" data-index="${index}" data-time="${line.time}">
-        ${
-          line.words
-            ? line.words
-                .map(w =>
-                  `<span class="lyrics-word" data-time="${w.time}">${escapeHTML(w.text)} </span>`
-                )
-                .join("")
-            : escapeHTML(line.text || "\u00A0")
-        }
-      </div>
-    `)
-    .join("");
+  const lines = result.lines;
+  const WINDOW = 2; // lines of context shown on each side
 
-  // Tapping a line seeks to it, same as dragging the progress bar —
-  // it only sets audio.currentTime, it never starts/stops playback.
-  body.querySelectorAll(".lyrics-line").forEach(el => {
+  let html = "";
+  for (let offset = -WINDOW; offset <= WINDOW; offset++) {
+    const index = activeIndex + offset;
+    const line = lines[index];
+
+    if (!line) {
+      html += `
+        <div class="player-lyrics-line" data-distance="${Math.abs(offset)}" aria-hidden="true">&nbsp;</div>
+      `;
+      continue;
+    }
+
+    html += `
+      <div class="player-lyrics-line" data-distance="${Math.abs(offset)}" data-index="${index}">
+        ${escapeHTML(line.text || "\u00A0")}
+      </div>
+    `;
+  }
+
+  track.innerHTML = html;
+
+  // Tapping a visible line seeks to it, same as dragging the
+  // progress bar — it only sets audio.currentTime, it never
+  // starts/stops playback.
+  track.querySelectorAll(".player-lyrics-line[data-index]").forEach(el => {
     el.addEventListener("click", () => {
-      const time = Number(el.dataset.time);
+      const index = Number(el.dataset.index);
+      const time = lines[index]?.time;
       if (Number.isFinite(time) && audio.duration) {
         audio.currentTime = Math.min(time, audio.duration);
         updateProgress();
@@ -3508,30 +3479,12 @@ function renderLyrics(result) {
   });
 }
 
-// Scrolls the active line to the center of #lyricsBody by setting
-// that element's own scrollTop directly, instead of Element.
-// scrollIntoView(), which (even with a container that has
-// overscroll-behavior: contain) can still nudge ancestor scroll
-// containers on some WebKit builds. Touching only body.scrollTop
-// guarantees the close button / "Lyrics" title above it — and the
-// rest of the app behind the player — never move.
-function scrollLyricsLineIntoView(el, body) {
-  if (!el || !body) return;
-  const targetTop =
-    el.offsetTop - body.clientHeight / 2 + el.clientHeight / 2;
-
-  body.scrollTo({
-    top: Math.max(0, targetTop),
-    behavior: "smooth"
-  });
-}
-
 // Called from updateProgress() (the existing "timeupdate" handler) —
-// this does not add a new listener. No-ops immediately whenever the
-// panel is closed or this song has no synced lyrics loaded, so it
-// costs nothing on the common path.
+// this does not add a new listener. No-ops immediately whenever
+// there's no current song or this song has no synced lyrics loaded,
+// so it costs nothing on the common path.
 function updateLyricsSync() {
-  if (!lyricsPanelOpen || !state.currentSong) return;
+  if (!state.currentSong) return;
 
   const cached = lyricsCache.get(state.currentSong.id);
   if (!cached || cached.unavailable || !cached.lines.length) return;
@@ -3548,36 +3501,9 @@ function updateLyricsSync() {
     }
   }
 
-  const body = document.getElementById("lyricsBody");
-
   if (index !== activeLyricsLineIndex) {
     activeLyricsLineIndex = index;
-
-    if (body) {
-      body
-        .querySelectorAll(".lyrics-line.active")
-        .forEach(el => el.classList.remove("active"));
-
-      if (index >= 0) {
-        const el = body.querySelector(`.lyrics-line[data-index="${index}"]`);
-        if (el) {
-          el.classList.add("active");
-          scrollLyricsLineIntoView(el, body);
-        }
-      }
-    }
-  }
-
-  // Karaoke word-level highlight within the active line, only when
-  // this line actually has real word timestamps.
-  if (body && index >= 0 && lines[index].words) {
-    const el = body.querySelector(`.lyrics-line[data-index="${index}"]`);
-    if (el) {
-      el.querySelectorAll(".lyrics-word").forEach(wordEl => {
-        const wt = Number(wordEl.dataset.time);
-        wordEl.classList.toggle("sung", Number.isFinite(wt) && wt <= t);
-      });
-    }
+    renderPlayerLyricsTicker(cached, index);
   }
 }
 
