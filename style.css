@@ -928,8 +928,18 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-menu-btn:active { transform: translateX(8px) scale(.9); color: #fff; }
 
 .player-cover {
-  width: min(86vw, 380px, 32dvh);
+  /* Bigger, but still a true square (aspect-ratio: 1 below) with
+     rounded corners (border-radius below) — just a larger version
+     of the same shape, not a full-bleed square.
+     flex-shrink: 0 matters here: without it, on short viewports the
+     column flex layout was squashing this item's height below what
+     aspect-ratio computed from its width, so it rendered as a
+     rectangle instead of a square. Locking flex-shrink keeps the
+     square intact; any overflow is handled by .player's own
+     overflow: hidden instead of deforming the cover. */
+  width: min(92vw, 440px, 40dvh);
   aspect-ratio: 1;
+  flex-shrink: 0;
   /* Nudged down so its top edge lines up with the close/menu
      buttons in .player-top-row instead of sitting flush above them. */
   margin: clamp(6px, 1.6dvh, 14px) auto clamp(14px, 3.5dvh, 28px);
