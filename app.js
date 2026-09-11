@@ -2586,6 +2586,8 @@ function previousSong() {
 // cover art's existing fade-in (see .cover-art-loaded) instead of
 // swapping abruptly. Just a class toggle + a timeout — no extra
 // layout work, no re-render of anything else.
+let identityFadeToken = 0;
+
 function setPlayerIdentityText(title, artist) {
   const titleEl = document.getElementById("playerTitle");
   const artistEl = document.getElementById("playerArtist");
@@ -2595,15 +2597,28 @@ function setPlayerIdentityText(title, artist) {
     return; // already showing this song's identity — nothing to animate
   }
 
+  // Tag this fade with its own token. Skipping tracks quickly could
+  // fire this function again before the previous timeout below had
+  // run, and the stale timeout would still swap in its now-outdated
+  // text a moment later — visible as the title flashing back to a
+  // dimmer/wrong state right after it had already updated. Only the
+  // most recent call is allowed to finish the swap.
+  const token = ++identityFadeToken;
+
   titleEl.classList.add("identity-fade");
   artistEl.classList.add("identity-fade");
 
+  // Matches the 180ms opacity transition in style.css (with a small
+  // buffer) so the swap always happens once fully faded out, instead
+  // of cutting the transition off mid-flight and restarting it from
+  // a half-faded state.
   setTimeout(() => {
+    if (token !== identityFadeToken) return; // superseded by a newer song already
     titleEl.textContent = title;
     artistEl.textContent = artist;
     titleEl.classList.remove("identity-fade");
     artistEl.classList.remove("identity-fade");
-  }, 160);
+  }, 190);
 }
 
 function updatePlayerUI() {
@@ -2622,16 +2637,14 @@ function updatePlayerUI() {
     "miniCover",
     song.cover_url,
     title,
-    "𝄞",
-    "restoreMiniCoverPlaceholder"
+    "𝄞"
   );
 
   setCoverArt(
     "playerCover",
     song.cover_url,
     title,
-    `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`,
-    "restorePlayerCoverPlaceholder"
+    `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`
   );
 
   miniPlayer.classList.remove("hidden");
@@ -3645,6 +3658,7 @@ function buildLyricsList(result) {
 // this always fills the .player-lyrics box without overflowing it.
 function renderLyricsLine(index) {
   const track = document.getElementById("playerLyricsTrack");
+  const container = document.getElementById("playerLyrics");
   if (!track) return;
 
   const line = index >= 0 ? currentLyricsLines[index] : null;
@@ -3659,11 +3673,12 @@ function renderLyricsLine(index) {
   // (matching normal reading order) instead of always left-to-right —
   // the words themselves are still split/joined in the same logical
   // order either way, only the visual direction changes.
-  track.dir = RTL_TEXT_RE.test(text) ? "rtl" : "ltr";
+  const dir = RTL_TEXT_RE.test(text) ? "rtl" : "ltr";
+  track.dir = dir;
 
   const words = text.split(/\s+/).filter(Boolean);
 
-  track.innerHTML = words
+  const wordsHtml = words
     .map((word, i) => {
       const clean = normalizeLyricWord(word);
       const colorHex = LYRICS_COLOR_WORDS[clean];
@@ -3676,20 +3691,55 @@ function renderLyricsLine(index) {
     })
     .join(" ");
 
-  fitLyricsText();
+  // Work out this line's font size against an offscreen probe BEFORE
+  // the animated word spans ever touch the live track — see
+  // measureLyricsFontSize()'s comment for why that ordering is the
+  // part that actually matters for smoothness.
+  if (container && container.clientHeight > 0) {
+    track.style.fontSize = measureLyricsFontSize(container, dir, wordsHtml) + "px";
+  }
+
+  track.innerHTML = wordsHtml;
 }
 
-// Binary-searches a font-size (between LYRICS_FONT_MIN/MAX) for the
-// current line so its wrapped words fill .player-lyrics vertically
-// without overflowing — short lines render larger, long lines wrap
-// across more lines at a smaller size, so the box never looks
-// empty/tiny and never clips or scrolls. Re-run whenever the active
-// line changes or the box is resized (see setupLyricsResize()/openFullPlayer()).
-function fitLyricsText() {
-  const container = document.getElementById("playerLyrics");
-  const track = document.getElementById("playerLyricsTrack");
-  if (!container || !track || !track.textContent.trim()) return;
-  if (container.clientHeight === 0) return; // player closed/hidden — refit happens on open instead
+// Binary-searches a font-size (between LYRICS_FONT_MIN/MAX) so `html`
+// (the same word-span markup renderLyricsLine() is about to show)
+// fills .player-lyrics vertically without overflowing — short lines
+// render larger, long lines wrap across more lines at a smaller size.
+//
+// This runs against a detached, invisible clone rather than the live
+// track. A binary search needs several style-write/scrollHeight-read
+// round trips, and each one forces a synchronous layout — doing that
+// directly on the live spans (the old approach) meant those forced
+// reflows landed *after* the new line's words were already inserted
+// and their CSS entrance animation had already started counting down
+// its 380ms. On a slower phone that measuring work could easily eat
+// 20-50ms of the animation's own timeline before the first frame was
+// ever painted, so the fade-in visibly started partway through
+// instead of at opacity 0 — the stutter/lag this fixes. Measuring on
+// a throwaway clone keeps all of that thrashing off the real,
+// animating elements; the live track is only ever touched once, and
+// already at the right size.
+function measureLyricsFontSize(container, dir, html) {
+  const probe = document.createElement("div");
+  probe.className = "player-lyrics-track";
+  probe.dir = dir;
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.left = "-9999px";
+  probe.style.top = "0";
+  probe.style.width = container.clientWidth + "px";
+  probe.style.maxHeight = "none";
+  probe.innerHTML = html;
+
+  // No need for the entrance animation to even exist on a probe
+  // that's never seen.
+  probe.querySelectorAll(".player-lyrics-word").forEach(word => {
+    word.style.animation = "none";
+  });
+
+  container.appendChild(probe);
 
   let lo = LYRICS_FONT_MIN;
   let hi = LYRICS_FONT_MAX;
@@ -3697,8 +3747,8 @@ function fitLyricsText() {
 
   for (let i = 0; i < 8; i++) {
     const mid = (lo + hi) / 2;
-    track.style.fontSize = mid + "px";
-    if (track.scrollHeight <= container.clientHeight + 0.5) {
+    probe.style.fontSize = mid + "px";
+    if (probe.scrollHeight <= container.clientHeight + 0.5) {
       best = mid;
       lo = mid;
     } else {
@@ -3706,7 +3756,22 @@ function fitLyricsText() {
     }
   }
 
-  track.style.fontSize = best + "px";
+  container.removeChild(probe);
+  return best;
+}
+
+// Re-measures the *current* line in place — used when the box itself
+// resizes (orientation change, mobile chrome showing/hiding) rather
+// than when the line changes, so there's no fresh markup to measure
+// ahead of time here; this reads directly off what's already shown.
+function fitLyricsText() {
+  const container = document.getElementById("playerLyrics");
+  const track = document.getElementById("playerLyricsTrack");
+  if (!container || !track || !track.textContent.trim()) return;
+  if (container.clientHeight === 0) return; // player closed/hidden — refit happens on open instead
+
+  track.style.fontSize =
+    measureLyricsFontSize(container, track.dir, track.innerHTML) + "px";
 }
 
 // Refits the current line whenever the viewport (and so the
@@ -3874,17 +3939,47 @@ function handleCoverError(img) {
   img.replaceWith(span);
 }
 
+// Tracks the latest setCoverArt() request per container, so a
+// slow/failing image from an earlier song can never clobber a newer
+// cover that already loaded into the same container (see
+// handleCoverErrorForContainer() below).
+const coverArtTokens = new Map();
+
+function resolveCoverUrl(url) {
+  try {
+    return new URL(url, window.location.href).href;
+  } catch (_) {
+    return url;
+  }
+}
+
 // Sets the mini player / full player cover container to either the
 // real cover art (with fallback restoration on error) or the exact
 // original placeholder markup, unchanged.
-function setCoverArt(containerId, coverUrl, altText, placeholderHTML, errorHandlerName) {
+function setCoverArt(containerId, coverUrl, altText, placeholderHTML) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
   if (!coverUrl) {
+    coverArtTokens.set(containerId, (coverArtTokens.get(containerId) || 0) + 1);
     container.innerHTML = placeholderHTML;
     return;
   }
+
+  // If this exact artwork is already showing in this container
+  // (resuming the same song, or back-to-back tracks off the same
+  // album/single), leave the current <img> in place instead of
+  // tearing it down and rebuilding it from scratch. Recreating an
+  // already-loaded image restarts its fade/scale-in animation, which
+  // is what made the cover visibly "jump" on every song change even
+  // when the artwork itself hadn't changed.
+  const existingImg = container.querySelector("img.cover-art");
+  if (existingImg && existingImg.src === resolveCoverUrl(coverUrl)) {
+    return;
+  }
+
+  const token = (coverArtTokens.get(containerId) || 0) + 1;
+  coverArtTokens.set(containerId, token);
 
   const safeAlt = escapeHTML(altText || "Album cover");
   const safeSrc = escapeHTML(coverUrl);
@@ -3896,24 +3991,24 @@ function setCoverArt(containerId, coverUrl, altText, placeholderHTML, errorHandl
       alt="${safeAlt}"
       decoding="async"
       onload="this.classList.add('cover-art-loaded')"
-      onerror="${errorHandlerName}(this)"
+      onerror="handleCoverErrorForContainer('${containerId}', ${token}, this)"
     />
   `;
 }
 
-function restoreMiniCoverPlaceholder() {
-  const container = document.getElementById("miniCover");
-  if (container) {
-    container.innerHTML = "𝄞";
-  }
-}
+function handleCoverErrorForContainer(containerId, token, img) {
+  // A newer cover has already been requested (or loaded) for this
+  // container since this image started loading — ignore this stale
+  // failure instead of wiping out the current, valid artwork.
+  if (coverArtTokens.get(containerId) !== token) return;
 
-function restorePlayerCoverPlaceholder() {
-  const container = document.getElementById("playerCover");
-  if (container) {
-    container.innerHTML =
-      `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`;
-  }
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.innerHTML =
+    containerId === "miniCover"
+      ? "𝄞"
+      : `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`;
 }
 
 
