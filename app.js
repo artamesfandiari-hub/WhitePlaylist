@@ -2718,6 +2718,12 @@ function openFullPlayer() {
   // display:none, so fitLyricsText() couldn't measure it earlier —
   // refit now that it's actually laid out.
   fitLyricsText();
+
+  // Lyrics may have already loaded while the player was closed (the
+  // box had zero size then, so prewarmLyricsFontSizes() no-op'd) —
+  // now that it's actually laid out, warm the rest of the lines in
+  // the background so playback doesn't pay for it later.
+  prewarmLyricsFontSizes(currentLyricsLines);
 }
 
 function closeFullPlayer() {
@@ -3506,13 +3512,6 @@ const LYRICS_NEGATIVE_WORDS = new Set([
   // English — common profanity
   "fuck","fucking","fucked","fucker","shit","bitch","ass","asshole",
   "damn","bastard","slut","whore","dick","pussy","crap","hoe",
-  // English — added: decay/despair/heartbreak vocabulary
-  "wither","withered","decay","decayed","poison","poisoned","cage",
-  "caged","haunt","haunted","haunting","despair","desperate","abandon",
-  "abandoned","betrayed","forsaken","doom","doomed","grim","bitter",
-  "bitterness","weep","weeping","mourning","torment","tormented",
-  "agony","anguish","dread","gloom","gloomy","shatter","shattered",
-  "crush","crushed","fade","faded","fading","vanish","vanished",
   // Persian — hate / dark feelings
   "کینه","بغض","نفرت","درد","خون","گریه","اشک","غم","غمگین","تنها",
   "تنهایی","شکسته","زخم","ترس","تاریک","تاریکی","شیطان","دشمن",
@@ -3520,10 +3519,6 @@ const LYRICS_NEGATIVE_WORDS = new Set([
   "عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم","پشیمون",
   "پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا","انتقام",
   "زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
-  // Persian — added: despair/grief vocabulary
-  "دلتنگی","حسرت","ماتم","عذاب","شکنجه","درماندگی","ناامید",
-  "ناامیدی","بیچاره","بدبخت","مصیبت","فاجعه","خرابی","انزوا",
-  "غربت","بی‌وفا","بی‌رحم","دلشکسته","افسرده","ناراحت","پریشان",
   // Persian — death / killing (all the conjugations that come up)
   "مرگ","مردن","مردم","مردی","مرد","مردیم","مردید","مردند",
   "می‌میرم","می‌میری","می‌میره","می‌میریم","می‌میرید","می‌میرند",
@@ -3562,14 +3557,6 @@ const LYRICS_POSITIVE_WORDS = new Set([
   "successful","blossom","bloom","laugh","laughter","rescue",
   "rescued","saved","salvation","truth","honest","loyalty","fly",
   "flying","wings","rainbow","miracle",
-  // English — added: joy/warmth vocabulary
-  "joyous","blissful","bliss","radiant","radiance","harmony",
-  "harmonious","tender","tenderness","embrace","cherish","cherished",
-  "treasure","treasured","comfort","comforting","serene","serenity",
-  "blossoming","flourish","flourishing","unity","united","triumph",
-  "triumphant","courage","courageous","brave","bravery","inspire",
-  "inspired","inspiring","wonderful","marvelous","delight",
-  "delightful","cheer","cheerful","optimistic","optimism",
   // Persian
   "عشق","امید","نور","شادی","خوشحال","لبخند","درخشیدن","آزاد",
   "آزادی","آرامش","شفا","رویا","زیبا","برکت","ایمان","اعتماد","گرم",
@@ -3578,11 +3565,6 @@ const LYRICS_POSITIVE_WORDS = new Set([
   "مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
   "خوشبختی","موفقیت","رهایی","نجات","بهار","گل","خنده","محبت",
   "وفا","صداقت","تولد",
-  // Persian — added: joy/warmth vocabulary
-  "شادمانی","سرور","هماهنگی","نوازش","محبوب","گرامی","دلگرم",
-  "دلگرمی","شکوفا","شکوفایی","اتحاد","یگانگی","پیروزمند","شجاعت",
-  "شجاع","دلیر","الهام","شگفت‌انگیز","لذت","لذت‌بخش","سرزنده",
-  "امیدوار","خوشبین",
 ]);
 
 // Exact color names → the CSS color they should render as. Checked
@@ -3603,19 +3585,6 @@ const LYRICS_COLOR_WORDS = {
   emerald: "#10b981", ruby: "#e11d48", amber: "#f59e0b",
   coral: "#fb7185", magenta: "#d946ef", lime: "#84cc16",
   olive: "#a3b325", bronze: "#b08d57", platinum: "#cbd5e1",
-  // English — added: concept words with a real, recognizable color
-  // (not color-name adjectives, but things everyone pictures in one
-  // color) — sky/water blue, fire orange, grass green, etc.
-  sky: "#38bdf8", water: "#38bdf8", ocean: "#0e7490", sea: "#0e7490",
-  azure: "#38bdf8", aqua: "#22d3ee", sun: "#facc15", fire: "#f97316",
-  flame: "#f97316", grass: "#22c55e", leaf: "#22c55e", leaves: "#22c55e",
-  snow: "#ffffff", rose: "#ec4899", lemon: "#eab308", cherry: "#ef4444",
-  honey: "#f59e0b", wine: "#b91c1c", sand: "#d6c7a1", mint: "#6ee7b7",
-  jade: "#10b981", sapphire: "#2563eb", cobalt: "#1d4ed8",
-  peach: "#fca5a5", salmon: "#fb7185", mustard: "#ca8a04",
-  cinnamon: "#b45309", chocolate: "#92400e", cream: "#f5f0e6",
-  rust: "#b91c1c", copper: "#c2703d", lilac: "#c4b5fd", plum: "#86198f",
-  pearl: "#f5f0e6",
   // Persian
   "قرمز": "#ef4444", "آبی": "#3b82f6", "سبز": "#22c55e",
   "زرد": "#eab308", "نارنجی": "#f97316", "بنفش": "#a855f7",
@@ -3627,17 +3596,6 @@ const LYRICS_COLOR_WORDS = {
   "یاقوتی": "#e11d48", "کهربایی": "#f59e0b", "مرجانی": "#fb7185",
   "سرخابی": "#d946ef", "لیمویی": "#84cc16", "زیتونی": "#a3b325",
   "برنزی": "#b08d57", "سرمه‌ای": "#60a5fa",
-  // Persian — added: concept words with a real, recognizable color
-  "آسمان": "#38bdf8", "آسمون": "#38bdf8", "آب": "#38bdf8",
-  "دریا": "#0e7490", "اقیانوس": "#0e7490", "خورشید": "#facc15",
-  "آتش": "#f97316", "شعله": "#f97316", "چمن": "#22c55e",
-  "برگ": "#22c55e", "برف": "#ffffff", "رز": "#ec4899",
-  "گل‌رز": "#ec4899", "لیمو": "#eab308", "گیلاس": "#ef4444",
-  "آلبالو": "#ef4444", "عسل": "#f59e0b", "شراب": "#b91c1c",
-  "شن": "#d6c7a1", "هلویی": "#fca5a5", "خردلی": "#ca8a04",
-  "دارچینی": "#b45309", "شکلاتی": "#92400e", "مسی": "#c2703d",
-  "لاجوردی": "#2563eb", "یشمی": "#10b981", "ارغوانی": "#a855f7",
-  "گلبهی": "#fca5a5", "مرواریدی": "#f5f0e6", "زرشکی": "#b91c1c",
 };
 
 // Strips punctuation/case for matching against the lists above, but
@@ -3679,6 +3637,35 @@ function buildLyricsList(result) {
 
   currentLyricsLines = result.lines;
   renderLyricsLine(activeLyricsLineIndex);
+
+  // Warm the font-size cache for every remaining line right away, in
+  // the background, instead of leaving each one to be measured for
+  // the first time whenever playback happens to reach it — see
+  // prewarmLyricsFontSizes()'s comment for why that's what was
+  // actually causing the felt lag.
+  prewarmLyricsFontSizes(currentLyricsLines);
+}
+
+// Builds the word-span markup for one lyrics line's already-split
+// word list. Pulled out on its own so both renderLyricsLine() (the
+// line actually on screen) and prewarmLyricsFontSizes() (every other
+// line, measured ahead of time in the background) build the exact
+// same markup — that's what lets the background measurement's cache
+// entry actually get reused later instead of missing on some subtle
+// difference.
+function buildLyricsWordsHtml(words) {
+  return words
+    .map((word, i) => {
+      const clean = normalizeLyricWord(word);
+      const colorHex = LYRICS_COLOR_WORDS[clean];
+      if (colorHex) {
+        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
+      }
+      const vibe = classifyWordVibe(clean);
+      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
+      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
+    })
+    .join(" ");
 }
 
 // Renders the line at `index` as individual word spans — they flow
@@ -3707,29 +3694,96 @@ function renderLyricsLine(index) {
   track.dir = dir;
 
   const words = text.split(/\s+/).filter(Boolean);
-
-  const wordsHtml = words
-    .map((word, i) => {
-      const clean = normalizeLyricWord(word);
-      const colorHex = LYRICS_COLOR_WORDS[clean];
-      if (colorHex) {
-        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
-      }
-      const vibe = classifyWordVibe(clean);
-      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
-      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
-    })
-    .join(" ");
+  const wordsHtml = buildLyricsWordsHtml(words);
 
   // Work out this line's font size against an offscreen probe BEFORE
   // the animated word spans ever touch the live track — see
   // measureLyricsFontSize()'s comment for why that ordering is the
-  // part that actually matters for smoothness.
+  // part that actually matters for smoothness. In the common case
+  // prewarmLyricsFontSizes() has already measured this exact line in
+  // the background, so this is just a cache read, not a fresh layout
+  // pass — see that function's comment for why that's the part that
+  // actually stopped the lag.
   if (container && container.clientHeight > 0) {
     track.style.fontSize = measureLyricsFontSize(container, dir, wordsHtml) + "px";
   }
 
   track.innerHTML = wordsHtml;
+}
+
+// Precomputes and caches the font size for every lyrics line up
+// front, a few lines per idle slot, instead of only ever measuring a
+// line the first time playback reaches it.
+//
+// Without this, reaching a brand-new (uncached) line inside
+// updateLyricsSync() — which runs on every "timeupdate" tick — does
+// measureLyricsFontSize()'s full 6-step measure/layout pass right
+// there in the playback callback. That's real, synchronous layout
+// thrashing (style write + scrollHeight read, six times over) landing
+// directly in the middle of normal playback handling, and on lyrics
+// with a lot of short/fast-changing lines that's exactly what was
+// showing up as felt lag / a busy phone, especially on weaker
+// devices — not the word-entrance animation itself.
+//
+// Warming the cache here means that by the time playback actually
+// reaches each line, measureLyricsFontSize() is almost always a plain
+// cache hit (same container width + identical markup, via
+// buildLyricsWordsHtml()) — no forced layout, no jank, right in the
+// path that used to pay for it.
+//
+// Safe to call anytime: it no-ops while the lyrics box is hidden
+// (clientWidth/clientHeight 0, e.g. the full player is closed — see
+// openFullPlayer(), which re-triggers this once the box is actually
+// laid out), and a fresh call always supersedes any still-running
+// one via lyricsPrewarmToken, so switching songs mid-warm-up can't
+// leave a stale background loop measuring the wrong lyrics.
+let lyricsPrewarmToken = 0;
+
+function prewarmLyricsFontSizes(lines) {
+  const token = ++lyricsPrewarmToken;
+
+  if (!lines || !lines.length) return;
+
+  const container = document.getElementById("playerLyrics");
+  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
+
+  const schedule =
+    (typeof requestIdleCallback === "function" && requestIdleCallback) ||
+    (cb => setTimeout(() => cb({ timeRemaining: () => 8 }), 0));
+
+  let i = 0;
+
+  function step() {
+    if (token !== lyricsPrewarmToken) return; // superseded by a newer song's lines
+
+    const liveContainer = document.getElementById("playerLyrics");
+    if (!liveContainer || liveContainer.clientWidth === 0 || liveContainer.clientHeight === 0) {
+      return; // box got hidden again meanwhile — stop, openFullPlayer() will resume this
+    }
+
+    let processed = 0;
+
+    // A handful of lines per slot keeps each individual chunk cheap
+    // (this is still real layout work, just moved off the playback
+    // path and spread out instead of done all at once).
+    while (i < lines.length && processed < 4) {
+      const text = (lines[i].text || "").trim();
+
+      if (text) {
+        const dir = RTL_TEXT_RE.test(text) ? "rtl" : "ltr";
+        const words = text.split(/\s+/).filter(Boolean);
+        const html = buildLyricsWordsHtml(words);
+        measureLyricsFontSize(liveContainer, dir, html);
+      }
+
+      i++;
+      processed++;
+    }
+
+    if (i < lines.length) schedule(step);
+  }
+
+  schedule(step);
 }
 
 // Binary-searches a font-size (between LYRICS_FONT_MIN/MAX) so `html`
