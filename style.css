@@ -956,7 +956,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   text-align: center;
   font-size: 22px; font-weight: 800; line-height: 28px;
+  transition: opacity 180ms var(--ease);
 }
+.player-title.identity-fade { opacity: 0; }
 
 .player-artist {
   width: 100%;
@@ -965,7 +967,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   text-align: center;
   color: var(--text-muted);
   font-size: 14px; line-height: 20px;
+  transition: opacity 180ms var(--ease);
 }
+.player-artist.identity-fade { opacity: 0; }
 
 /* PROGRESS + WAVEFORM — two separate visual layers sharing one hit
    area. The waveform canvas (real amplitude bars, drawn by
@@ -1139,14 +1143,12 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   padding: calc(20px + env(safe-area-inset-top)) 20px calc(25px + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, #101010 0%, #0a0a0a 60%, #070707 100%);
   border-radius: 28px 28px 0 0;
-  transform: translateY(0);
   opacity: 1;
-  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease);
+  transition: opacity var(--dur-slow) var(--ease);
 }
 
 .lyrics-panel.hidden {
   opacity: 0;
-  transform: translateY(16px);
   pointer-events: none;
 }
 

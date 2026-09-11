@@ -2509,6 +2509,31 @@ function previousSong() {
   startPlayback(state.queue[index]);
 }
 
+// Fades the full-player title/artist out and back in whenever the
+// song identity actually changes, so they change in step with the
+// cover art's existing fade-in (see .cover-art-loaded) instead of
+// swapping abruptly. Just a class toggle + a timeout — no extra
+// layout work, no re-render of anything else.
+function setPlayerIdentityText(title, artist) {
+  const titleEl = document.getElementById("playerTitle");
+  const artistEl = document.getElementById("playerArtist");
+  if (!titleEl || !artistEl) return;
+
+  if (titleEl.textContent === title && artistEl.textContent === artist) {
+    return; // already showing this song's identity — nothing to animate
+  }
+
+  titleEl.classList.add("identity-fade");
+  artistEl.classList.add("identity-fade");
+
+  setTimeout(() => {
+    titleEl.textContent = title;
+    artistEl.textContent = artist;
+    titleEl.classList.remove("identity-fade");
+    artistEl.classList.remove("identity-fade");
+  }, 160);
+}
+
 function updatePlayerUI() {
   if (!state.currentSong) return;
 
@@ -2519,8 +2544,7 @@ function updatePlayerUI() {
 
   document.getElementById("miniTitle").textContent = title;
   document.getElementById("miniArtist").textContent = artist;
-  document.getElementById("playerTitle").textContent = title;
-  document.getElementById("playerArtist").textContent = artist;
+  setPlayerIdentityText(title, artist);
 
   setCoverArt(
     "miniCover",
