@@ -1013,9 +1013,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   text-align: center;
   font-size: 22px; font-weight: 800; line-height: 28px;
-  transition: opacity 180ms var(--ease);
 }
-.player-title.identity-fade { opacity: 0; }
 
 .player-artist {
   width: 100%;
@@ -1025,9 +1023,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   text-align: center;
   color: var(--text-muted);
   font-size: 14px; line-height: 20px;
-  transition: opacity 180ms var(--ease);
 }
-.player-artist.identity-fade { opacity: 0; }
 
 /* LYRICS — only the current synced line is ever shown, laid out as
    normal wrapped text: words flow left-to-right and wrap top-to-

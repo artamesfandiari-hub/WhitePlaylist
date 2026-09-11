@@ -2581,44 +2581,22 @@ function previousSong() {
   startPlayback(state.queue[index]);
 }
 
-// Fades the full-player title/artist out and back in whenever the
-// song identity actually changes, so they change in step with the
-// cover art's existing fade-in (see .cover-art-loaded) instead of
-// swapping abruptly. Just a class toggle + a timeout — no extra
-// layout work, no re-render of anything else.
-let identityFadeToken = 0;
-
+// Updates the full-player title/artist immediately whenever the song
+// identity changes. No fade/animation here on purpose — animating
+// this text (fade out, swap, fade back in) visibly reads as
+// flickering every time the song changes, so it's just a direct
+// text swap now.
 function setPlayerIdentityText(title, artist) {
   const titleEl = document.getElementById("playerTitle");
   const artistEl = document.getElementById("playerArtist");
   if (!titleEl || !artistEl) return;
 
   if (titleEl.textContent === title && artistEl.textContent === artist) {
-    return; // already showing this song's identity — nothing to animate
+    return; // already showing this song's identity — nothing to do
   }
 
-  // Tag this fade with its own token. Skipping tracks quickly could
-  // fire this function again before the previous timeout below had
-  // run, and the stale timeout would still swap in its now-outdated
-  // text a moment later — visible as the title flashing back to a
-  // dimmer/wrong state right after it had already updated. Only the
-  // most recent call is allowed to finish the swap.
-  const token = ++identityFadeToken;
-
-  titleEl.classList.add("identity-fade");
-  artistEl.classList.add("identity-fade");
-
-  // Matches the 180ms opacity transition in style.css (with a small
-  // buffer) so the swap always happens once fully faded out, instead
-  // of cutting the transition off mid-flight and restarting it from
-  // a half-faded state.
-  setTimeout(() => {
-    if (token !== identityFadeToken) return; // superseded by a newer song already
-    titleEl.textContent = title;
-    artistEl.textContent = artist;
-    titleEl.classList.remove("identity-fade");
-    artistEl.classList.remove("identity-fade");
-  }, 190);
+  titleEl.textContent = title;
+  artistEl.textContent = artist;
 }
 
 function updatePlayerUI() {
@@ -3629,6 +3607,10 @@ function classifyWordVibe(cleanWord) {
 }
 
 function buildLyricsList(result) {
+  // New song, new set of lines — any cached font sizes were measured
+  // against the previous song's line markup and are meaningless here.
+  lyricsFontSizeCache.clear();
+
   const track = document.getElementById("playerLyricsTrack");
   if (!track) return;
 
@@ -3720,7 +3702,31 @@ function renderLyricsLine(index) {
 // a throwaway clone keeps all of that thrashing off the real,
 // animating elements; the live track is only ever touched once, and
 // already at the right size.
+// Caches a measured font size per (container width + line markup) so
+// repeated lines — choruses are the common case, but a listener
+// seeking backward hits this too — skip the reflow-heavy binary
+// search entirely on repeat. This is the main cost on weak phones:
+// each binary-search step below is a synchronous layout (style write
+// then scrollHeight read), and re-running that full search on every
+// single line change was the actual source of the lag/stutter,
+// independent of the lyrics feature's normal per-line cost. Reset
+// whenever the container width changes (fitLyricsText's resize path)
+// or a new song's lines are loaded (buildLyricsList), since a cached
+// size is only valid for the width it was measured against.
+let lyricsFontSizeCache = new Map();
+let lyricsFontSizeCacheWidth = 0;
+
 function measureLyricsFontSize(container, dir, html) {
+  const width = container.clientWidth;
+  if (width !== lyricsFontSizeCacheWidth) {
+    lyricsFontSizeCache.clear();
+    lyricsFontSizeCacheWidth = width;
+  }
+
+  const cacheKey = dir + "|" + html;
+  const cached = lyricsFontSizeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const probe = document.createElement("div");
   probe.className = "player-lyrics-track";
   probe.dir = dir;
@@ -3729,7 +3735,7 @@ function measureLyricsFontSize(container, dir, html) {
   probe.style.pointerEvents = "none";
   probe.style.left = "-9999px";
   probe.style.top = "0";
-  probe.style.width = container.clientWidth + "px";
+  probe.style.width = width + "px";
   probe.style.maxHeight = "none";
   probe.innerHTML = html;
 
@@ -3745,7 +3751,11 @@ function measureLyricsFontSize(container, dir, html) {
   let hi = LYRICS_FONT_MAX;
   let best = LYRICS_FONT_MIN;
 
-  for (let i = 0; i < 8; i++) {
+  // 6 steps (was 8) — halves neither precision nor smoothness
+  // noticeably (worst case ~0.3px off) but cuts two synchronous
+  // layout passes off every line change, which is where weak phones
+  // were losing the most time.
+  for (let i = 0; i < 6; i++) {
     const mid = (lo + hi) / 2;
     probe.style.fontSize = mid + "px";
     if (probe.scrollHeight <= container.clientHeight + 0.5) {
@@ -3757,6 +3767,7 @@ function measureLyricsFontSize(container, dir, html) {
   }
 
   container.removeChild(probe);
+  lyricsFontSizeCache.set(cacheKey, best);
   return best;
 }
 
