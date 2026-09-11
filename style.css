@@ -1069,36 +1069,37 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   line-height: 1.3;
   color: #fff;
   text-align: center;
-  /* Bold display cut for Latin lyrics — Anton only ships one weight,
-     so it ignores font-weight: 800 above and just renders at its own
-     (already very bold) native weight. */
-  font-family: "Anton", "Times New Roman", sans-serif;
-  letter-spacing: 0.3px;
+  /* Medium-weight display font for Latin lyrics — bolder/more
+     deliberate than the app's plain system font, without being an
+     all-caps/decorative display face. */
+  font-family: "Poppins", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  letter-spacing: 0.1px;
 }
 
 /* Persian/Arabic lines (dir="rtl", set per-line in app.js) get
-   Lalezar instead — a bold Persian display face — with normal
-   letter-spacing and a touch looser line-height since it's taller. */
+   Vazirmatn instead — a clean, moderately bold Persian face — at the
+   same weight as the Latin one so neither reads as more "extra" than
+   the other. */
 .player-lyrics-track[dir="rtl"] {
-  font-family: "Lalezar", "Times New Roman", sans-serif;
+  font-family: "Vazirmatn", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   letter-spacing: 0;
-  line-height: 1.45;
+  line-height: 1.35;
 }
 
 /* KEYWORD VIBE COLORING — individual words matching a small curated
    list (English + Persian) get tinted red for a dark/negative vibe
    (hate, pain, betrayal, death...) or green for a hopeful/positive
-   one (love, hope, light...), each with a soft matching glow. Applied
-   per-word in app.js's classifyWordVibe(); most words stay plain
-   white — only clearly-loaded words get a color. */
+   one (love, hope, light...). Applied per-word in app.js's
+   classifyWordVibe(); most words stay plain white — only clearly-
+   loaded words get a color. Color only, no glow — keeps it readable
+   and in step with the rest of the UI's flat look.
+   */
 .player-lyrics-word--negative {
   color: #ff4d4f;
-  text-shadow: 0 0 18px rgba(255, 77, 79, .5);
 }
 
 .player-lyrics-word--positive {
   color: #3ddc84;
-  text-shadow: 0 0 18px rgba(61, 220, 132, .5);
 }
 
 /* Each word is its own element (rather than one solid line) so the
