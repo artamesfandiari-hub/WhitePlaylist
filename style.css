@@ -928,21 +928,9 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-menu-btn:active { transform: translateX(8px) scale(.9); color: #fff; }
 
 .player-cover {
-  /* Bigger, but still a true square (aspect-ratio: 1 below) with
-     rounded corners (border-radius below) — just a larger version
-     of the same shape, not a full-bleed square.
-     flex-shrink: 0 matters here: without it, on short viewports the
-     column flex layout was squashing this item's height below what
-     aspect-ratio computed from its width, so it rendered as a
-     rectangle instead of a square. Locking flex-shrink keeps the
-     square intact; any overflow is handled by .player's own
-     overflow: hidden instead of deforming the cover. */
-  width: min(92vw, 440px, 40dvh);
+  width: min(86vw, 380px, 32dvh);
   aspect-ratio: 1;
-  flex-shrink: 0;
-  /* Nudged down so its top edge lines up with the close/menu
-     buttons in .player-top-row instead of sitting flush above them. */
-  margin: clamp(6px, 1.6dvh, 14px) auto clamp(14px, 3.5dvh, 28px);
+  margin: 0 auto clamp(14px, 3.5dvh, 28px);
   border-radius: var(--radius-xl);
   background: #151515;
   display: flex; align-items: center; justify-content: center;
@@ -1048,9 +1036,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 /* Every line starts as a small, near-invisible caption — almost a
    placeholder — so the jump to the active line reads as a real
-   typographic event, not a gentle size bump. Context lines (distance
-   1/2/3) stay single-line captions — they're supporting text, so
-   clipping/horizontal-scroll on the rare long one is fine. */
+   typographic event, not a gentle size bump. */
 .player-lyrics-line {
   width: 100%;
   max-width: 100%;
@@ -1062,6 +1048,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #fff;
   opacity: .13;
   transform: scale(.82);
+  /* No more clipped "…" on long lines — if a line still doesn't
+     fit after the auto-shrink app.js applies to the active line,
+     it scrolls horizontally on its own instead of truncating. */
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
@@ -1081,17 +1070,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
    type that pops into place with a spring overshoot instead of
    fading in politely. No letter-spacing added (keeps Persian/Arabic
    script joined correctly); size + weight + motion carry the
-   "typography moment" instead.
-   Unlike the context lines above, this one wraps normally (word by
-   word, left-to-right for Latin script / right-to-left for Persian
-   & Arabic — the browser's own bidi + line-breaking handles both)
-   instead of staying on one line and scrolling sideways, so a long
-   line forms full rows that fill the box instead of running off the
-   edge or needing a swipe to read. app.js's fitActiveLyricLine()
-   measures the wrapped result and picks the largest font size
-   (between 15px and this clamp's ceiling) that still keeps it within
-   ~2 wrapped rows, so it uses the space it's given without the words
-   crowding together or the text overflowing. */
+   "typography moment" instead. */
 .player-lyrics-line[data-distance="0"] {
   padding: 2px 14px;
   font-size: clamp(23px, 7.2vw, 29px);
@@ -1100,10 +1079,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #fff;
   opacity: 1;
   transform: scale(1);
-  white-space: normal;
-  overflow: visible;
-  word-wrap: break-word;
-  overflow-wrap: anywhere;
   animation: lyricPop 560ms cubic-bezier(.22, 1.6, .36, 1);
 }
 
