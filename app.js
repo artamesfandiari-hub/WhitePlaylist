@@ -58,6 +58,7 @@ const state = {
       : null,
 
   songs: [],
+  groupSongs: [],
   favorites: [],
   artists: [],
   albums: [],
@@ -301,6 +302,7 @@ async function init() {
 
   await Promise.allSettled([
     loadSongs(),
+    loadGroupSongs(),
     loadFavorites(),
     loadArtists(),
     loadAlbums(),
@@ -389,6 +391,10 @@ function setupNavigation() {
   document
     .getElementById("seeAllSongs")
     .addEventListener("click", () => showPage("songsPage"));
+
+  document
+    .getElementById("seeAllGroupPlaylist")
+    ?.addEventListener("click", () => showPage("groupPlaylistPage"));
 
   document.querySelectorAll("[data-back]").forEach(button => {
     button.addEventListener("click", () => {
@@ -1012,6 +1018,123 @@ function findSong(id) {
   return state.songs.find(
     song => Number(song.id) === Number(id)
   );
+}
+
+/* =========================================================
+   GROUP PLAYLIST
+   (songs sent to the configured Telegram group — kept fully
+   separate from the personal library above. Read-only from this
+   app's point of view: playback reuses the exact same <audio>
+   element/queue as everywhere else, but there's no favorite/
+   delete/add-to-playlist here since these songs aren't owned by
+   the viewing user.)
+   ========================================================= */
+
+async function loadGroupSongs() {
+  try {
+    const data = await api("/group-songs?limit=200");
+
+    state.groupSongs = data.songs || [];
+
+    renderGroupPlaylistHome();
+    renderGroupPlaylistPage();
+  } catch (error) {
+    console.error("Group playlist:", error);
+
+    showError("groupPlaylistHomeList", "Couldn't load Group Playlist.");
+    showError("groupPlaylistList", "Couldn't load Group Playlist.");
+  }
+}
+
+function renderGroupPlaylistHome() {
+  showHomeSection(
+    "groupPlaylistHomeSection",
+    state.groupSongs.length > 0
+  );
+
+  const container = document.getElementById("groupPlaylistHomeList");
+  if (!container) return;
+
+  const songs = state.groupSongs.slice(0, 10);
+
+  container.innerHTML = songs.map(groupSongHTML).join("");
+  bindGroupSongButtons(container, songs);
+}
+
+function renderGroupPlaylistPage() {
+  const container = document.getElementById("groupPlaylistList");
+  if (!container) return;
+
+  if (!state.groupSongs.length) {
+    container.innerHTML =
+      `<div class="empty">No songs in the group yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = state.groupSongs.map(groupSongHTML).join("");
+  bindGroupSongButtons(container, state.groupSongs);
+}
+
+// Same visual row as songHTML(), minus the "⋯" actions button —
+// favoriting/deleting/adding-to-playlist all act on the viewer's own
+// library and don't apply to a shared group song.
+function groupSongHTML(song) {
+  const artist = song.artist || "Unknown Artist";
+  const album = song.album || "Unknown Album";
+
+  return `
+    <div class="song-item" data-song-id="${song.id}">
+
+      <button
+        class="song-cover"
+        data-action="play"
+        data-id="${song.id}"
+        aria-label="Play ${escapeHTML(song.title || "song")}"
+      >
+        ${coverInnerHTML(song.cover_url, song.title)}
+      </button>
+
+      <button
+        class="song-info"
+        data-action="play"
+        data-id="${song.id}"
+        style="text-align:left"
+      >
+        <div class="song-title">
+          ${escapeHTML(song.title || "Unknown")}
+        </div>
+
+        <div class="song-meta">
+          ${escapeHTML(artist)}
+          •
+          ${escapeHTML(album)}
+        </div>
+      </button>
+
+    </div>
+  `;
+}
+
+function bindGroupSongButtons(container, songsList) {
+  if (!container) return;
+
+  const list = Array.isArray(songsList) ? songsList : state.groupSongs;
+
+  container.querySelectorAll("[data-action='play']").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const id = Number(button.dataset.id);
+      const song = list.find(item => Number(item.id) === id);
+
+      if (!song) return;
+
+      playSong(song, list);
+    });
+  });
+
+  highlightPlayingRow();
 }
 
 /* =========================================================

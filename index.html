@@ -186,6 +186,21 @@
           <div class="hscroll" id="homeRecommendationsList"></div>
         </div>
 
+        <!-- GROUP PLAYLIST -->
+        <div class="home-section hidden" id="groupPlaylistHomeSection">
+          <div class="section-heading">
+            <h2>Group Playlist</h2>
+            <button id="seeAllGroupPlaylist">See all</button>
+          </div>
+
+          <div
+            class="song-list"
+            id="groupPlaylistHomeList"
+          >
+            <div class="loading">Loading...</div>
+          </div>
+        </div>
+
         <!-- RECENTLY ADDED (existing, moved lower) -->
         <div class="home-section">
           <div class="section-heading">
@@ -229,6 +244,33 @@
         <div
           class="song-list"
           id="allSongs"
+        >
+          <div class="loading">Loading...</div>
+        </div>
+      </section>
+
+      <!-- GROUP PLAYLIST (full list) -->
+      <section
+        class="page"
+        id="groupPlaylistPage"
+      >
+        <button
+          class="back-button"
+          data-back="homePage"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polyline points="15 5 8 12 15 19"></polyline>
+          </svg>
+          <span>Home</span>
+        </button>
+
+        <div class="page-title-row">
+          <h1>Group Playlist</h1>
+        </div>
+
+        <div
+          class="song-list"
+          id="groupPlaylistList"
         >
           <div class="loading">Loading...</div>
         </div>
