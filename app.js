@@ -2377,6 +2377,14 @@ function setupPlayer() {
   // Waveform canvas is sized off its own rendered box, so it needs a
   // repaint (not a recompute) whenever the layout changes.
   window.addEventListener("resize", redrawWaveformProgress);
+
+  // The active lyric line's font size is fit to the box width (see
+  // fitActiveLyricLine()) — refit on rotation/resize so it doesn't
+  // stay sized for the old viewport.
+  window.addEventListener("resize", () => {
+    clearTimeout(lyricsFitResizeTimer);
+    lyricsFitResizeTimer = setTimeout(refitActiveLyricLine, 120);
+  });
 }
 
 // contextList is the list the song was selected from (e.g. the
@@ -2696,6 +2704,12 @@ function openFullPlayer() {
   // already cached (or being generated) via loadWaveform(), so this
   // never re-fetches or re-decodes anything.
   redrawWaveformProgress();
+
+  // Same story for the active lyric line: fitActiveLyricLine() bails
+  // out early while the box has zero width, so if the line didn't
+  // change while the player was closed, refit it now that it's
+  // actually laid out.
+  refitActiveLyricLine();
 }
 
 function closeFullPlayer() {
@@ -3210,6 +3224,16 @@ let activeLyricsLineIndex = -1;
 let lyricsUserScrollUntil = 0;
 let lyricsResumeTimer = null;
 let lyricsProgrammaticScroll = false;
+
+// Auto-fit sizing for the active lyric line (see fitActiveLyricLine()
+// below): it wraps word-by-word to fill the box width instead of the
+// old single-line-with-horizontal-scroll behavior, so its font size
+// is picked per-line by measuring, not fixed in CSS.
+const LYRIC_FONT_MIN = 15; // px — never shrinks past this, even for very long lines
+const LYRIC_FONT_MAX = 29; // px — matches the old clamp() ceiling, so short lines don't balloon
+const LYRIC_LINE_HEIGHT = 1.22; // matches the CSS line-height on the active line
+const LYRIC_MAX_WRAPPED_LINES = 2; // budget the box for ~2 wrapped lines before shrinking further
+let lyricsFitResizeTimer = null;
 let lyricsProgScrollTimer = null;
 let lyricsInteractionReady = false;
 const LYRICS_RESUME_DELAY = 3200; // ms of no interaction before recentering
@@ -3520,6 +3544,53 @@ function buildLyricsList(result) {
   requestAnimationFrame(() => scrollLyricsToActive(activeLyricsLineIndex, false));
 }
 
+// Fits the active lyric line's font size to the box it has: words
+// wrap normally (see the [data-distance="0"] CSS) so a long line
+// forms full width-filling rows instead of running off the edge, and
+// this picks the largest size — between LYRIC_FONT_MIN/MAX — that
+// still keeps the wrapped text within LYRIC_MAX_WRAPPED_LINES worth
+// of height, so short lines stay big and long lines shrink smoothly
+// instead of clipping or requiring a horizontal swipe to read.
+function fitActiveLyricLine(el) {
+  if (!el) return;
+
+  el.style.fontSize = ""; // fall back to the CSS clamp() to read its natural max
+  if (!el.clientWidth) return; // not laid out (e.g. player closed) — CSS default is fine
+
+  const cssMax = parseFloat(getComputedStyle(el).fontSize) || LYRIC_FONT_MAX;
+  let lo = LYRIC_FONT_MIN;
+  let hi = Math.min(cssMax, LYRIC_FONT_MAX);
+
+  // A one-word (or already-short) line already fits at the max size —
+  // skip the measuring loop.
+  el.style.fontSize = hi + "px";
+  if (el.scrollHeight <= hi * LYRIC_LINE_HEIGHT * LYRIC_MAX_WRAPPED_LINES + 2) return;
+
+  let best = lo;
+  for (let i = 0; i < 7; i++) {
+    const mid = (lo + hi) / 2;
+    el.style.fontSize = mid + "px";
+    const maxHeight = mid * LYRIC_LINE_HEIGHT * LYRIC_MAX_WRAPPED_LINES + 2;
+    if (el.scrollHeight <= maxHeight) {
+      best = mid;
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  el.style.fontSize = best + "px";
+}
+
+// Re-runs the fit for whichever line is currently active — used on
+// resize/orientation change, since the fit above is measured against
+// the box's current width.
+function refitActiveLyricLine() {
+  const track = document.getElementById("playerLyricsTrack");
+  if (!track) return;
+  const el = track.querySelector('.player-lyrics-line[data-distance="0"]');
+  fitActiveLyricLine(el);
+}
+
 // Smoothly scrolls the lyrics container so the line at `index` sits
 // dead-center — never lets it appear to climb in from the bottom.
 // Marks the scroll as programmatic so the container's own 'scroll'
@@ -3557,11 +3628,11 @@ function setActiveLyricsLine(index) {
     const distance = index < 0 ? 3 : Math.min(3, Math.abs(lineIndex - index));
     el.dataset.distance = String(distance);
 
-    // Long active lines shrink a little first so fewer of them need
-    // the horizontal swipe-to-read fallback.
+    // The active line wraps word-by-word to fill the box (see the
+    // [data-distance="0"] CSS) and is sized to fit via measurement —
+    // see fitActiveLyricLine().
     if (distance === 0) {
-      const len = el.textContent.trim().length;
-      el.style.fontSize = len > 46 ? "15px" : len > 30 ? "16.5px" : "";
+      fitActiveLyricLine(el);
     } else {
       el.style.fontSize = "";
     }
