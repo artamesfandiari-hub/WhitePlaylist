@@ -1000,6 +1000,12 @@ function openSongActionsMenu(song, context = {}) {
   favoriteLabel.textContent = liked ? "Unfavorite" : "Favorite";
   favoriteBtn.classList.toggle("active", liked);
 
+  // The full player already has its own dedicated like/heart button,
+  // so the ⋯ menu opened from there skips the redundant Favorite
+  // entry. Every other ⋯ menu (song lists, playlists, search, etc.)
+  // is unaffected — it only hides here when context.type === "player".
+  favoriteBtn.classList.toggle("hidden", context?.type === "player");
+
   const isPlaylistContext = context?.type === "playlist";
 
   if (deleteBtn) {
@@ -2306,7 +2312,7 @@ function setupPlayer() {
     .getElementById("playerMenuButton")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        openSongActionsMenu(state.currentSong);
+        openSongActionsMenu(state.currentSong, { type: "player" });
       }
     });
 
@@ -3417,7 +3423,7 @@ function parseLRC(lrcText) {
 }
 
 // Renders the inline lyrics ticker: the active line (distance 0)
-// plus up to two lines of context on each side, faded further the
+// plus up to one line of context on each side, faded further the
 // farther they sit from what's currently playing (see the
 // .player-lyrics-line[data-distance] rules in style.css). Called
 // whenever lyrics data first loads for a song (activeIndex -1, no
@@ -3441,7 +3447,7 @@ function renderPlayerLyricsTicker(result, activeIndex) {
   }
 
   const lines = result.lines;
-  const WINDOW = 2; // lines of context shown on each side
+  const WINDOW = 1; // lines of context shown on each side
 
   let html = "";
   for (let offset = -WINDOW; offset <= WINDOW; offset++) {
