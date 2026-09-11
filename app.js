@@ -3475,55 +3475,109 @@ const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 // classifyWordVibe()/LYRICS_COLOR_WORDS strip punctuation/case and
 // check the word against these; matches get tinted red (dark/
 // negative — death, drugs, profanity, hate...), green (hopeful/
-// positive), or — for a literal color name — that exact color, via
-// .player-lyrics-word--negative/--positive or an inline style in
-// renderLyricsLine(). Most words stay plain white; only matches get
-// colored.
+// positive), or — for a literal color name, or a word that has a
+// well-known real-world color ("sky", "water", "fire"...) — that
+// exact color, via .player-lyrics-word--negative/--positive or an
+// inline style in renderLyricsLine(). Most words stay plain white;
+// only matches get colored.
+//
+// LYRICS_NEGATIVE_PHRASES catches compound phrases where a word that
+// is normally positive on its own actually belongs to a dark/explicit
+// phrase — e.g. "star" is positive alone, but in "porn star" the
+// whole phrase is negative, so "porn star" is listed here and forces
+// *both* words red instead of leaving "star" green. See
+// renderLyricsLine() for how the override is applied, and how a bare
+// punctuation-only token (an opening quote, a colon, etc.) sitting
+// next to a colored word now inherits that same color instead of
+// staying plain white.
 const LYRICS_NEGATIVE_WORDS = new Set([
   // English — hate / dark feelings
-  "hate","pain","broken","hurt","scar","scars","scared","fear",
-  "afraid","dark","darkness","evil","demon","devil","enemy","enemies",
-  "betray","betrayal","lie","lies","liar","war","fight","grave",
-  "curse","cursed","rage","angry","anger","sad","sadness","sorrow",
-  "misery","suffer","suffering","wound","wounds","nightmare","hell",
-  "sin","shame","regret","loss","lost","cold","empty","void","scream",
-  "venom","toxic","ashes","ruin","ruined","destroy","destroyed",
-  "grief","mourn","revenge","hopeless","trap","trapped","chains",
-  "prison","drown","drowning","numb","fake","cry","crying","tears",
-  "alone","lonely","blood","bleed","bleeding","burn","burning",
+  "hate","hated","hatred","pain","painful","broken","hurt","hurts",
+  "hurtful","scar","scars","scarred","scared","fear","feared",
+  "fearful","afraid","dark","darkness","evil","demon","demons",
+  "devil","devils","enemy","enemies","betray","betrayed","betrays",
+  "betrayal","lie","lies","lying","liar","liars","war","wars",
+  "fight","fights","fighting","grave","graves","curse","cursed",
+  "curses","rage","angry","anger","sad","sadness","sorrow","sorrowful",
+  "misery","miserable","suffer","suffers","suffering","suffered",
+  "wound","wounds","wounded","nightmare","nightmares","hell",
+  "sin","sins","sinful","shame","shameful","ashamed","regret",
+  "regrets","regretful","loss","lost","cold","coldness","empty",
+  "emptiness","void","scream","screams","screaming","venom",
+  "venomous","toxic","ashes","ruin","ruins","ruined","destroy",
+  "destroys","destroyed","destruction","grief","grieving","mourn",
+  "mourning","revenge","hopeless","hopelessness","trap","trapped",
+  "chains","chained","prison","prisoner","drown","drowning",
+  "drowned","numb","numbness","fake","cry","cries","crying","tears",
+  "alone","loneliness","lonely","blood","bloody","bleed","bleeds",
+  "bleeding","burn","burns","burning","burned","despair","desperate",
+  "desperation","despise","despised","loathe","loathing","cruel",
+  "cruelty","vicious","violent","violence","abuse","abused",
+  "abusive","victim","trauma","traumatized","panic","anxiety",
+  "anxious","dread","dreadful","doom","doomed","ache","aching",
+  "aches","misfortune","tragedy","tragic","catastrophe","disaster",
+  "chaos","conflict","battle","battlefield","bomb","bombs",
+  "explosion","explode","exploded","weapon","weapons","rifle",
+  "pistol","trigger","injury","injured","bruise","bruised",
+  "torture","tortured","torment","tormented","haunted","haunt",
+  "haunting","ghost","ghosts","grim","gloom","gloomy","bitter",
+  "bitterness","spite","spiteful","jealous","jealousy","envy",
+  "envious","greed","greedy","corrupt","corrupted","corruption",
+  "criminal","thief","thieves","steal","stole","stolen","robbery",
+  "fraud","cage","caged","poison","poisoned","poisonous","plague",
+  "disease","diseased","sick","sickness","illness","dying","decay",
+  "decayed","decaying","rot","rotten","rotting","filth","filthy",
+  "dirty","waste","wasted","failure","failed","fail","fails",
+  "useless","worthless","desolate","desolation","heartbroken",
+  "abandon","abandoned","abandonment","reject","rejected",
+  "rejection","ignored","forgotten","invisible","insecure",
+  "insecurity","guilt","guilty","punish","punished","punishment",
+  "oppress","oppressed","oppression","stress","stressed","misled",
+  "deceive","deceived","deception","manipulate","manipulated",
+  "manipulation","suffocate","suffocating","exile","exiled",
+  "hollow","broke","nothing","nowhere","worst","wrong","struggle",
+  "struggling","damn","damned","apart","fallen","fall","falling",
+  "collapse","collapsed","collapsing","end","ended","ending","over",
+  "goodbye","farewell",
   // English — death / killing (every common conjugation)
   "die","died","dies","dying","kill","kills","killed","killing",
-  "killer","murder","murders","murdered","murderer","murdering",
-  "suicide","corpse","coffin","funeral","graveyard","deadly","lethal",
-  "execute","executed","execution","slain","slay","slays","slaughter",
-  "massacre","homicide","fatal","perish","perished","death","dead",
-  "gun","knife","stab","stabbed","shot","shoot","shooting","choke",
-  "choked","strangle","strangled","bury","buried",
+  "killer","killers","murder","murders","murdered","murderer",
+  "murdering","suicide","corpse","corpses","coffin","funeral",
+  "graveyard","deadly","lethal","execute","executed","execution",
+  "slain","slay","slays","slaughter","slaughtered","massacre",
+  "homicide","fatal","perish","perished","death","deaths","dead",
+  "gun","guns","knife","knives","stab","stabbed","shot","shoot",
+  "shooting","shooter","choke","choked","strangle","strangled",
+  "bury","buried","hang","hanged","hanging","overdosed","bloodshed",
   // English — drugs / pills
   "pill","pills","drug","drugs","xanax","molly","cocaine","coke",
   "heroin","weed","meth","overdose","addict","addicted","addiction",
   "syringe","needle","dope","narcotic","opioid","high","stoned",
+  "junkie","withdrawal","relapse",
+  // English — explicit / sexual profanity
+  "porn","porno","pornography","nsfw","nude","naked","erotic",
+  "escort","prostitute","prostitution","brothel",
   // English — common profanity
   "fuck","fucking","fucked","fucker","shit","bitch","ass","asshole",
   "damn","bastard","slut","whore","dick","pussy","crap","hoe",
-  // English — added: decay/despair/heartbreak vocabulary
-  "wither","withered","decay","decayed","poison","poisoned","cage",
-  "caged","haunt","haunted","haunting","despair","desperate","abandon",
-  "abandoned","betrayed","forsaken","doom","doomed","grim","bitter",
-  "bitterness","weep","weeping","mourning","torment","tormented",
-  "agony","anguish","dread","gloom","gloomy","shatter","shattered",
-  "crush","crushed","fade","faded","fading","vanish","vanished",
+  "cunt",
   // Persian — hate / dark feelings
-  "کینه","بغض","نفرت","درد","خون","گریه","اشک","غم","غمگین","تنها",
-  "تنهایی","شکسته","زخم","ترس","تاریک","تاریکی","شیطان","دشمن",
-  "خیانت","دروغ","جنگ","اسلحه","چاقو","قبر","زهر","نفرین","خشم",
-  "عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم","پشیمون",
-  "پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا","انتقام",
-  "زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
-  // Persian — added: despair/grief vocabulary
-  "دلتنگی","حسرت","ماتم","عذاب","شکنجه","درماندگی","ناامید",
-  "ناامیدی","بیچاره","بدبخت","مصیبت","فاجعه","خرابی","انزوا",
-  "غربت","بی‌وفا","بی‌رحم","دلشکسته","افسرده","ناراحت","پریشان",
+  "کینه","بغض","نفرت","درد","دردناک","خون","خونین","گریه","اشک",
+  "غم","غمگین","اندوه","تنها","تنهایی","شکسته","زخم","زخمی","ترس",
+  "ترسناک","تاریک","تاریکی","شیطان","شیطانی","دشمن","دشمنی",
+  "خیانت","خائن","دروغ","دروغین","جنگ","جنگی","اسلحه","چاقو","قبر",
+  "زهر","نفرین","خشم","خشمگین","عصبانی","غصه","غصه‌دار","رنج",
+  "رنج‌آور","کابوس","جهنم","گناه","گناهکار","شرم","شرمنده","پشیمون",
+  "پشیمان","خالی","پوچی","جیغ","سم","ویرانی","نابود","نابودی","عزا",
+  "عزادار","انتقام","زندان","زندانی","زنجیر","دود","سوختن","سوزان",
+  "خفه","خفگی","پوچ","دروغی","استرس","اضطراب","دلهره","وحشت",
+  "وحشتناک","فاجعه","بحران","هرج‌ومرج","بمب","انفجار","تفنگ",
+  "زخمی‌شده","شکنجه","عذاب","حسادت","حسود","طمع","فاسد","فساد",
+  "جنایت","جنایتکار","دزد","دزدی","کلاهبرداری","قفس","تله",
+  "بیماری","بیمار","کثیف","شکست","شکست‌خورده","بی‌ارزش","ناامید",
+  "ناامیدی","دلشکسته","طرد","فراموش","نامرئی","مجازات","ظلم",
+  "ظالم","توهم","خیانت‌کار","بی‌رحم","بی‌رحمی","سیاهی","پایان",
+  "خداحافظ","تمام","هیچ","هیچی","بدبخت","بدبختی",
   // Persian — death / killing (all the conjugations that come up)
   "مرگ","مردن","مردم","مردی","مرد","مردیم","مردید","مردند",
   "می‌میرم","می‌میری","می‌میره","می‌میریم","می‌میرید","می‌میرند",
@@ -3537,11 +3591,13 @@ const LYRICS_NEGATIVE_WORDS = new Set([
   "میکشم","میکشی","میکشه","میکشیم","میکشید","میکشند",
   "بکشم","بکشی","بکشه","بکشیم","بکشید","بکشند","بکش","بکشمت",
   "کشته","قتل","قاتل","کشتار","خودکشی","جسد","تابوت","گورستان",
-  "قتل‌عام","اعدام",
+  "قتل‌عام","اعدام","دار","حلق‌آویز",
   // Persian — drugs / pills
   "قرص","قرصا","قرص‌ها","مواد","موادمخدر","هروئین","تریاک",
   "کوکائین","حشیش","شیشه","ماری‌جوانا","علف","دوپ","اوردوز",
-  "معتاد","اعتیاد","سرنگ","تزریق","نئشه","مسکن","مخدر",
+  "معتاد","اعتیاد","سرنگ","تزریق","نئشه","مسکن","مخدر","قاچاقچی",
+  // Persian — explicit / sexual
+  "پورن","پورنو","برهنه","لخت","فاحشه","روسپی",
   // Persian — common profanity
   "کیری","کص","کس‌کش","کسکش","جنده","عوضی","لعنتی","کثافت",
   "آشغال","حروم‌زاده","حرومی","گوه","کونی","مادرجنده","ننه‌جنده",
@@ -3550,40 +3606,91 @@ const LYRICS_NEGATIVE_WORDS = new Set([
 
 const LYRICS_POSITIVE_WORDS = new Set([
   // English
-  "love","loved","loving","hope","hopeful","light","joy","joyful",
-  "happy","happiness","smile","shine","shining","free","freedom",
-  "peace","heal","healing","healed","dream","dreams","beautiful",
-  "blessed","bless","grace","faith","trust","warm","warmth","home",
-  "family","friend","friends","together","forever","rise","rising",
-  "alive","life","soul","star","stars","sun","sunshine","bright",
-  "glow","glory","victory","win","winning","strong","strength",
-  "heaven","angel","sweet","kind","kindness","gentle","safe","calm",
-  "proud","grateful","gratitude","beauty","magic","success",
-  "successful","blossom","bloom","laugh","laughter","rescue",
-  "rescued","saved","salvation","truth","honest","loyalty","fly",
-  "flying","wings","rainbow","miracle",
-  // English — added: joy/warmth vocabulary
-  "joyous","blissful","bliss","radiant","radiance","harmony",
-  "harmonious","tender","tenderness","embrace","cherish","cherished",
-  "treasure","treasured","comfort","comforting","serene","serenity",
-  "blossoming","flourish","flourishing","unity","united","triumph",
-  "triumphant","courage","courageous","brave","bravery","inspire",
-  "inspired","inspiring","wonderful","marvelous","delight",
-  "delightful","cheer","cheerful","optimistic","optimism",
+  "love","loved","loving","lover","hope","hopeful","hoping","light",
+  "joy","joyful","happy","happiness","smile","smiling","shine",
+  "shining","shone","free","freedom","peace","peaceful","heal",
+  "healing","healed","dream","dreams","dreaming","beautiful",
+  "blessed","bless","blessing","blessings","grace","graceful",
+  "faith","faithful","trust","trusted","trusting","warm","warmth",
+  "home","family","friend","friends","friendship","together",
+  "forever","rise","rising","risen","alive","life","living","soul",
+  "star","stars","bright","brightness","glow","glowing","glory",
+  "glorious","victory","victorious","win","winning","won","strong",
+  "strength","heaven","heavenly","angel","angels","sweet","sweetest",
+  "kind","kindness","gentle","gently","safe","safety","calm","calming",
+  "proud","pride","grateful","gratitude","beauty","beautifully",
+  "magic","magical","success","successful","blossom","blossoming",
+  "bloom","blooming","laugh","laughing","laughter","rescue",
+  "rescued","saved","salvation","truth","truthful","honest",
+  "honesty","loyalty","loyal","fly","flying","wings","rainbow",
+  "miracle","miraculous","adore","adored","adoring","cherish",
+  "cherished","embrace","embraced","comfort","comforted",
+  "comforting","harmony","harmonious","unity","united","celebrate",
+  "celebration","triumph","triumphant","courage","courageous",
+  "brave","bravery","inspire","inspired","inspiring","inspiration",
+  "wonder","wonderful","amazing","awesome","radiant","radiance",
+  "sparkle","sparkling","twinkle","twinkling","tender","tenderness",
+  "cozy","serenity","serene","tranquil","tranquility","blissful",
+  "bliss","delight","delighted","delightful","cheer","cheerful",
+  "optimism","optimistic","positive","positivity","thrive",
+  "thriving","flourish","flourishing","abundance","abundant",
+  "generous","generosity","compassion","compassionate","empathy",
+  "forgive","forgiven","forgiveness","reunite","reunion","cuddle",
+  "hug","hugs","kiss","kisses","devotion","devoted","faithfulness",
+  "honor","honored","respect","respected","admire","admired",
+  "wisdom","wise","enlighten","enlightened","enlightenment","pure",
+  "purity","innocent","innocence","paradise","utopia","eternal",
+  "eternity","timeless","legend","legendary","icon","iconic",
+  "champion","unstoppable","fearless","confidence","confident",
+  "empower","empowered","empowering","angelic","celestial","divine",
+  "sacred","holy","spirit","spirited","vibrant","vivid","colorful",
+  "festive","jubilant","euphoria","euphoric","ecstatic","elated",
+  "content","contentment","satisfied","satisfaction","fulfilled",
+  "fulfillment","wholesome","nurture","nurturing","support",
+  "supportive","encourage","encouraged","encouraging","motivate",
+  "motivated","motivation","new","newborn","born","promise",
+  "promised","true","genuine","gift","gifted","treasure",
   // Persian
-  "عشق","امید","نور","شادی","خوشحال","لبخند","درخشیدن","آزاد",
-  "آزادی","آرامش","شفا","رویا","زیبا","برکت","ایمان","اعتماد","گرم",
-  "خانواده","دوست","باهم","همیشه","زندگی","روح","ستاره","خورشید",
-  "روشن","درخشش","افتخار","پیروزی","قوی","بهشت","فرشته","مهربون",
-  "مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
-  "خوشبختی","موفقیت","رهایی","نجات","بهار","گل","خنده","محبت",
-  "وفا","صداقت","تولد",
-  // Persian — added: joy/warmth vocabulary
-  "شادمانی","سرور","هماهنگی","نوازش","محبوب","گرامی","دلگرم",
-  "دلگرمی","شکوفا","شکوفایی","اتحاد","یگانگی","پیروزمند","شجاعت",
-  "شجاع","دلیر","الهام","شگفت‌انگیز","لذت","لذت‌بخش","سرزنده",
-  "امیدوار","خوشبین",
+  "عشق","عاشق","امید","امیدوار","نور","نورانی","شادی","خوشحال",
+  "خوشحالی","لبخند","درخشیدن","درخشان","آزاد","آزادی","آرامش",
+  "آروم","آرام","شفا","رویا","رویاها","زیبا","زیبایی","برکت",
+  "ایمان","اعتماد","گرم","گرمی","خانواده","دوست","دوستی","باهم",
+  "همیشه","زندگی","روح","ستاره","خورشید","روشن","روشنایی","درخشش",
+  "افتخار","پیروزی","پیروز","قوی","قدرتمند","بهشت","بهشتی","فرشته",
+  "مهربون","مهربان","مهربانی","امن","امنیت","آرامش‌بخش","غرور",
+  "سپاس","سپاسگزار","زیبایی","خوشبختی","خوشبخت","موفقیت","موفق",
+  "رهایی","نجات","بهار","گل","خنده","محبت","وفا","وفادار","صداقت",
+  "تولد","پرستش","محبوب","آغوش","هماهنگی","اتحاد","متحد","جشن",
+  "پیروزمند","شجاعت","شجاع","الهام","الهام‌بخش","شگفت‌انگیز",
+  "معجزه","لطیف","شادمان","سخاوتمند","دلسوز","همدلی","بخشش",
+  "بخشیدن","احترام","حکمت","خردمند","پاک","پاکی","معصوم","معصومیت",
+  "جاودان","جاودانه","افسانه‌ای","قهرمان","بی‌باک","بی‌پروا",
+  "مقتدر","الهی","مقدس","روحانی","پرانرژی","رنگارنگ","سرخوش",
+  "راضی","رضایت","حمایت","انگیزه","باور","صادقانه","هدیه","گنج",
+  "تازه","نو","قول","وعده","حقیقی","آغاز","شروع","بیدار","زنده",
 ]);
+
+// Compound phrases that flip the vibe of the words inside them,
+// checked as a sliding window over the line's normalized words
+// BEFORE the single-word negative/positive lists above are applied.
+// This is what fixes cases like "porn star" — "star" alone is
+// positive, but as part of this phrase both words get forced to
+// the negative/red color instead of "star" wrongly staying green.
+// Each entry is an array of already-normalized (lowercase,
+// punctuation-stripped) words, matched in that exact order.
+const LYRICS_NEGATIVE_PHRASES = [
+  // English
+  ["porn","star"],["porn","stars"],["sex","tape"],["crime","scene"],
+  ["blood","bath"],["hate","crime"],["death","threat"],
+  ["suicide","note"],["serial","killer"],["mass","shooting"],
+  ["drug","lord"],["drug","dealer"],["knife","fight"],
+  ["gang","war"],["rock","bottom"],["broken","dream"],
+  ["broken","dreams"],["broken","heart"],["broken","hearts"],
+  // Persian
+  ["پورن","استار"],["پورن","استاره"],["صحنه","جرم"],
+  ["قاتل","زنجیره‌ای"],["قاچاقچی","مواد"],["دل","شکسته"],
+  ["قلب","شکسته"],["رویای","شکسته"],["رویاهای","شکسته"],
+];
 
 // Exact color names → the CSS color they should render as. Checked
 // before the negative/positive lists in renderLyricsLine(), so a
@@ -3603,19 +3710,6 @@ const LYRICS_COLOR_WORDS = {
   emerald: "#10b981", ruby: "#e11d48", amber: "#f59e0b",
   coral: "#fb7185", magenta: "#d946ef", lime: "#84cc16",
   olive: "#a3b325", bronze: "#b08d57", platinum: "#cbd5e1",
-  // English — added: concept words with a real, recognizable color
-  // (not color-name adjectives, but things everyone pictures in one
-  // color) — sky/water blue, fire orange, grass green, etc.
-  sky: "#38bdf8", water: "#38bdf8", ocean: "#0e7490", sea: "#0e7490",
-  azure: "#38bdf8", aqua: "#22d3ee", sun: "#facc15", fire: "#f97316",
-  flame: "#f97316", grass: "#22c55e", leaf: "#22c55e", leaves: "#22c55e",
-  snow: "#ffffff", rose: "#ec4899", lemon: "#eab308", cherry: "#ef4444",
-  honey: "#f59e0b", wine: "#b91c1c", sand: "#d6c7a1", mint: "#6ee7b7",
-  jade: "#10b981", sapphire: "#2563eb", cobalt: "#1d4ed8",
-  peach: "#fca5a5", salmon: "#fb7185", mustard: "#ca8a04",
-  cinnamon: "#b45309", chocolate: "#92400e", cream: "#f5f0e6",
-  rust: "#b91c1c", copper: "#c2703d", lilac: "#c4b5fd", plum: "#86198f",
-  pearl: "#f5f0e6",
   // Persian
   "قرمز": "#ef4444", "آبی": "#3b82f6", "سبز": "#22c55e",
   "زرد": "#eab308", "نارنجی": "#f97316", "بنفش": "#a855f7",
@@ -3627,17 +3721,45 @@ const LYRICS_COLOR_WORDS = {
   "یاقوتی": "#e11d48", "کهربایی": "#f59e0b", "مرجانی": "#fb7185",
   "سرخابی": "#d946ef", "لیمویی": "#84cc16", "زیتونی": "#a3b325",
   "برنزی": "#b08d57", "سرمه‌ای": "#60a5fa",
-  // Persian — added: concept words with a real, recognizable color
-  "آسمان": "#38bdf8", "آسمون": "#38bdf8", "آب": "#38bdf8",
-  "دریا": "#0e7490", "اقیانوس": "#0e7490", "خورشید": "#facc15",
-  "آتش": "#f97316", "شعله": "#f97316", "چمن": "#22c55e",
-  "برگ": "#22c55e", "برف": "#ffffff", "رز": "#ec4899",
-  "گل‌رز": "#ec4899", "لیمو": "#eab308", "گیلاس": "#ef4444",
-  "آلبالو": "#ef4444", "عسل": "#f59e0b", "شراب": "#b91c1c",
-  "شن": "#d6c7a1", "هلویی": "#fca5a5", "خردلی": "#ca8a04",
-  "دارچینی": "#b45309", "شکلاتی": "#92400e", "مسی": "#c2703d",
-  "لاجوردی": "#2563eb", "یشمی": "#10b981", "ارغوانی": "#a855f7",
-  "گلبهی": "#fca5a5", "مرواریدی": "#f5f0e6", "زرشکی": "#b91c1c",
+};
+
+// Words that aren't color names themselves but have a well-known
+// real-world color ("sky" is blue, "water" is blue, "grass" is
+// green...). Checked after LYRICS_COLOR_WORDS/phrase overrides but
+// before the plain negative/positive vibe lists, so e.g. "sky" shows
+// its natural blue instead of staying plain white or, for a word
+// like "sun" that also sits in LYRICS_POSITIVE_WORDS, its natural
+// yellow instead of the generic positive green.
+const LYRICS_ASSOCIATED_COLOR_WORDS = {
+  // English
+  sky: "#38bdf8", skies: "#38bdf8", water: "#3b82f6",
+  ocean: "#0ea5e9", sea: "#0ea5e9", rain: "#60a5fa",
+  raindrop: "#60a5fa", raindrops: "#60a5fa", river: "#38bdf8",
+  grass: "#4ade80", leaf: "#4ade80", leaves: "#4ade80",
+  tree: "#22c55e", trees: "#22c55e", forest: "#15803d",
+  fire: "#f97316", flame: "#f97316", flames: "#f97316",
+  sun: "#facc15", sunshine: "#facc15", moon: "#cbd5e1",
+  snow: "#f8fafc", cloud: "#e2e8f0", clouds: "#e2e8f0",
+  rose: "#f43f5e", roses: "#f43f5e", wine: "#be123c",
+  coffee: "#78350f", chocolate: "#78350f", honey: "#f59e0b",
+  lemon: "#eab308", ice: "#bfdbfe", diamond: "#e5e7eb",
+  pearl: "#f8fafc", sand: "#d6b98c", desert: "#d6b98c",
+  storm: "#64748b", thunder: "#94a3b8", lightning: "#fde68a",
+  peach: "#fdba74", mango: "#fb923c", cherry: "#dc2626",
+  cherries: "#dc2626", grape: "#7c3aed", grapes: "#7c3aed",
+  // Persian
+  "آسمان": "#38bdf8", "آسمون": "#38bdf8", "آب": "#3b82f6",
+  "دریا": "#0ea5e9", "اقیانوس": "#0ea5e9", "باران": "#60a5fa",
+  "رودخانه": "#38bdf8", "چمن": "#4ade80", "برگ": "#4ade80",
+  "درخت": "#22c55e", "جنگل": "#15803d", "آتش": "#f97316",
+  "خورشید": "#facc15", "ماه": "#cbd5e1", "برف": "#f8fafc",
+  "ابر": "#e2e8f0", "شراب": "#be123c", "قهوه": "#78350f",
+  "شکلات": "#78350f", "عسل": "#f59e0b", "لیمو": "#eab308",
+  "یخ": "#bfdbfe", "الماس": "#e5e7eb", "مروارید": "#f8fafc",
+  "شن": "#d6b98c", "صحرا": "#d6b98c", "بیابان": "#d6b98c",
+  "طوفان": "#64748b", "رعد": "#94a3b8", "هلو": "#fdba74",
+  "انبه": "#fb923c", "گیلاس": "#dc2626", "آلبالو": "#dc2626",
+  "انگور": "#7c3aed",
 };
 
 // Strips punctuation/case for matching against the lists above, but
@@ -3681,6 +3803,112 @@ function buildLyricsList(result) {
   renderLyricsLine(activeLyricsLineIndex);
 }
 
+// Scans the line's cleaned words for any LYRICS_NEGATIVE_PHRASES
+// match (a sliding window over consecutive words) and returns the
+// set of word indices that must be forced negative/red regardless of
+// how each word classifies on its own — this is what stops a normally
+// positive word like "star" from staying green inside a phrase like
+// "porn star".
+function findForcedNegativeIndices(cleanWords) {
+  const forced = new Set();
+
+  for (const phrase of LYRICS_NEGATIVE_PHRASES) {
+    const len = phrase.length;
+
+    for (let i = 0; i <= cleanWords.length - len; i++) {
+      let matches = true;
+
+      for (let j = 0; j < len; j++) {
+        if (cleanWords[i + j] !== phrase[j]) {
+          matches = false;
+          break;
+        }
+      }
+
+      if (matches) {
+        for (let j = 0; j < len; j++) forced.add(i + j);
+      }
+    }
+  }
+
+  return forced;
+}
+
+// Builds the colored word-span markup for one lyrics line. Priority
+// per word: an exact color name > a forced-negative phrase match >
+// a word with a well-known real-world color > the plain negative/
+// positive vibe lists. Punctuation-only tokens (a lone opening quote,
+// a colon split off by whitespace, etc.) have no letters to classify
+// on their own, so as a final pass each one inherits the color/class
+// of its nearest colored neighbor instead of staying plain white.
+function buildLyricsWordsHTML(words) {
+  const cleanWords = words.map(normalizeLyricWord);
+  const forcedNegative = findForcedNegativeIndices(cleanWords);
+
+  const entries = words.map((word, i) => {
+    const clean = cleanWords[i];
+
+    if (!clean) {
+      return { word, colorHex: null, vibeClass: null, punctuationOnly: true };
+    }
+
+    const colorHex = LYRICS_COLOR_WORDS[clean];
+    if (colorHex) {
+      return { word, colorHex, vibeClass: null, punctuationOnly: false };
+    }
+
+    if (forcedNegative.has(i)) {
+      return { word, colorHex: null, vibeClass: "negative", punctuationOnly: false };
+    }
+
+    const assocHex = LYRICS_ASSOCIATED_COLOR_WORDS[clean];
+    if (assocHex) {
+      return { word, colorHex: assocHex, vibeClass: null, punctuationOnly: false };
+    }
+
+    const vibe = classifyWordVibe(clean);
+    return { word, colorHex: null, vibeClass: vibe, punctuationOnly: false };
+  });
+
+  // Punctuation-only tokens borrow color from whichever neighbor sits
+  // right next to them (previous first, then next) — but only reach
+  // past OTHER punctuation-only tokens, never past a plain uncolored
+  // word, so a quote only ever picks up the color of the word it's
+  // actually attached to in the lyric.
+  entries.forEach((entry, i) => {
+    if (!entry.punctuationOnly) return;
+
+    let source = null;
+
+    for (let j = i - 1; j >= 0; j--) {
+      if (entries[j].punctuationOnly) continue;
+      if (entries[j].colorHex || entries[j].vibeClass) source = entries[j];
+      break;
+    }
+
+    if (!source) {
+      for (let j = i + 1; j < entries.length; j++) {
+        if (entries[j].punctuationOnly) continue;
+        if (entries[j].colorHex || entries[j].vibeClass) source = entries[j];
+        break;
+      }
+    }
+
+    if (source) {
+      entry.colorHex = source.colorHex;
+      entry.vibeClass = source.vibeClass;
+    }
+  });
+
+  return entries
+    .map((entry, i) => {
+      const vibeClass = entry.vibeClass ? ` player-lyrics-word--${entry.vibeClass}` : "";
+      const colorStyle = entry.colorHex ? `;color:${entry.colorHex}` : "";
+      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}${colorStyle}">${escapeHTML(entry.word)}</span>`;
+    })
+    .join(" ");
+}
+
 // Renders the line at `index` as individual word spans — they flow
 // left-to-right and wrap top-to-bottom exactly like normal text,
 // filling as many lines as the sentence needs instead of being
@@ -3707,19 +3935,7 @@ function renderLyricsLine(index) {
   track.dir = dir;
 
   const words = text.split(/\s+/).filter(Boolean);
-
-  const wordsHtml = words
-    .map((word, i) => {
-      const clean = normalizeLyricWord(word);
-      const colorHex = LYRICS_COLOR_WORDS[clean];
-      if (colorHex) {
-        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
-      }
-      const vibe = classifyWordVibe(clean);
-      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
-      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
-    })
-    .join(" ");
+  const wordsHtml = buildLyricsWordsHTML(words);
 
   // Work out this line's font size against an offscreen probe BEFORE
   // the animated word spans ever touch the live track — see
