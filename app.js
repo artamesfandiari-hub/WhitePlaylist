@@ -3480,6 +3480,65 @@ function parseLRC(lrcText) {
 // of always laying out left-to-right.
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 
+// KEYWORD VIBE COLORING — a small curated word list per language.
+// classifyWordVibe() strips punctuation/case and checks it against
+// these; matches get tinted red (dark/negative vibe) or green
+// (hopeful/positive vibe) in renderLyricsLine() via
+// .player-lyrics-word--negative/--positive. Deliberately short and
+// unambiguous — most words are left plain so the coloring reads as
+// picking out a few loaded words, not tagging everything.
+const LYRICS_NEGATIVE_WORDS = new Set([
+  // English
+  "hate","pain","kill","killer","killed","death","dead","die","dying",
+  "blood","bleed","bleeding","burn","burning","cry","crying","tears",
+  "alone","lonely","broken","hurt","scar","scars","scared","fear",
+  "afraid","dark","darkness","evil","demon","devil","enemy","enemies",
+  "betray","betrayal","lie","lies","liar","war","fight","gun","knife",
+  "grave","poison","curse","cursed","rage","angry","anger","sad",
+  "sadness","sorrow","misery","suffer","suffering","wound","wounds",
+  "nightmare","hell","sin","shame","regret","loss","lost","cold",
+  "empty","void","scream","venom","toxic","ashes","ruin","ruined",
+  "destroy","destroyed","grief","mourn","revenge","hopeless","hopeless",
+  "trap","trapped","chains","prison","drown","drowning","numb","fake",
+  // Persian
+  "کینه","بغض","نفرت","درد","مرگ","مردن","خون","گریه","اشک","غم",
+  "غمگین","تنها","تنهایی","شکسته","زخم","ترس","تاریک","تاریکی",
+  "شیطان","دشمن","خیانت","دروغ","جنگ","اسلحه","چاقو","قبر","زهر",
+  "نفرین","خشم","عصبانی","غصه","رنج","کابوس","جهنم","گناه","شرم",
+  "پشیمون","پشیمان","خالی","جیغ","سم","ویرانی","نابود","عزا",
+  "انتقام","زندان","زنجیر","دود","سوختن","خفه","پوچ","دروغی",
+]);
+
+const LYRICS_POSITIVE_WORDS = new Set([
+  // English
+  "love","loved","loving","hope","hopeful","light","joy","joyful",
+  "happy","happiness","smile","shine","shining","free","freedom",
+  "peace","heal","healing","healed","dream","dreams","beautiful",
+  "blessed","bless","grace","faith","trust","warm","warmth","home",
+  "family","friend","friends","together","forever","rise","rising",
+  "alive","life","soul","star","stars","sun","sunshine","bright",
+  "glow","glory","victory","win","winning","strong","strength",
+  "gold","golden","heaven","angel","sweet","kind","kindness","gentle",
+  "safe","calm","proud","grateful","gratitude","beauty","magic",
+  // Persian
+  "عشق","امید","نور","شادی","خوشحال","لبخند","درخشیدن","آزاد",
+  "آزادی","آرامش","شفا","رویا","زیبا","برکت","ایمان","اعتماد","گرم",
+  "خانواده","دوست","باهم","همیشه","زندگی","روح","ستاره","خورشید",
+  "روشن","درخشش","افتخار","پیروزی","قوی","طلایی","بهشت","فرشته",
+  "مهربون","مهربان","امن","آروم","آرامش‌بخش","غرور","سپاس","زیبایی",
+]);
+
+// Strips punctuation/case for matching against the lists above, but
+// the original word (with its punctuation) is still what gets shown —
+// this only decides which color class it gets, never rewrites it.
+function classifyWordVibe(rawWord) {
+  const clean = rawWord.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  if (!clean) return null;
+  if (LYRICS_NEGATIVE_WORDS.has(clean)) return "negative";
+  if (LYRICS_POSITIVE_WORDS.has(clean)) return "positive";
+  return null;
+}
+
 function buildLyricsList(result) {
   const track = document.getElementById("playerLyricsTrack");
   if (!track) return;
@@ -3529,10 +3588,11 @@ function renderLyricsLine(index) {
   const words = text.split(/\s+/).filter(Boolean);
 
   track.innerHTML = words
-    .map(
-      (word, i) =>
-        `<span class="player-lyrics-word" style="--word-i:${i}">${escapeHTML(word)}</span>`
-    )
+    .map((word, i) => {
+      const vibe = classifyWordVibe(word);
+      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
+      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
+    })
     .join(" ");
 
   fitLyricsText();
