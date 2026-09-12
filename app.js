@@ -1291,27 +1291,45 @@ async function addSongToLibrary(song, button) {
   }
 }
 
-// Sends a public Discover track to the user through their own
-// Telegram chat with the bot (POST /forward, which calls Telegram's
-// sendAudio reusing the song's existing telegram_file_id) — never a
-// browser download or the device's download list, since that's
-// unreliable (and often invisible) inside Telegram's in-app
-// WebView.
+// Downloads a public Discover track's actual audio file to the
+// device, reusing the exact same streaming endpoint playback uses
+// (GET /audio/:id) — fetched fully as a blob so the browser/Telegram
+// WebView can save real bytes under a real filename, rather than just
+// opening the stream inline.
 async function downloadSong(song) {
   if (!song?.id) return;
 
   try {
-    await api("/forward", {
-      method: "POST",
-      body: JSON.stringify({
-        song_id: song.id
-      })
-    });
+    const url =
+      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
 
-    alert("Sent! Check your chat with the bot.");
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("Couldn't download this song.");
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const ext =
+      (song.mime_type && song.mime_type.split("/")[1]) || "mp3";
+
+    const safeTitle =
+      (song.title || "song").replace(/[\\/:*?"<>|]+/g, "").trim() ||
+      "song";
+
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${safeTitle}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
   } catch (error) {
     console.error("Download:", error);
-    alert(error.message || "Couldn't send this song.");
+    alert(error.message || "Couldn't download this song.");
   }
 }
 
@@ -2322,27 +2340,19 @@ function forwardSong(song) {
     return;
   }
 
-  const title = (song.title || "").trim();
+  // switchInlineQuery() hands off to Telegram's own native
+  // recipient/chat picker — it does not open, close, or reload
+  // the Mini App. The query text is the track's actual name (not
+  // its Song ID); the Worker's inline handler searches only this
+  // user's own library for matches and lets them pick the exact
+  // track to send.
+  const query =
+    (song.title || "").trim();
 
-  if (!title) {
+  if (!query) {
     alert("Couldn't forward song.");
     return;
   }
-
-  // switchInlineQuery() hands off to Telegram's own native
-  // recipient/chat picker — it does not open, close, or reload the
-  // Mini App. For a personal-library song, the query is just the
-  // track's name, same as before: the Worker's inline handler
-  // searches this user's own library for a title match. A public
-  // Discover track (song._public) isn't owned by the viewer, so a
-  // title search scoped to their library would never find it —
-  // instead we lead the query with "#<songId>" so the Worker's
-  // inline handler can resolve the exact track by ID (see
-  // handleInlineForwardQuery() in worker.js). The title still
-  // follows the "#id" so the picker's search box stays readable.
-  const query = song._public
-    ? `#${song.id} ${title}`
-    : title;
 
   try {
     tg.switchInlineQuery(
@@ -2758,7 +2768,7 @@ function setupPlayer() {
     .getElementById("miniLike")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        togglePlayerLike(state.currentSong);
+        toggleFavorite(state.currentSong);
       }
     });
 
@@ -2782,7 +2792,7 @@ function setupPlayer() {
     .getElementById("playerLike")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        togglePlayerLike(state.currentSong);
+        toggleFavorite(state.currentSong);
       }
     });
 
@@ -3185,68 +3195,15 @@ function updatePlayerUI() {
   loadLyrics(song);
 }
 
-// Routes the player's heart button to the right like flow depending
-// on whether the currently playing song is a public Discover track
-// (song._public — liked via /group-songs/:id/like, its own
-// song_likes table) or a personal library song (liked via
-// /favorites). Using toggleFavorite() for a public song is what
-// produced the "Couldn't update favorite." error, since a Discover
-// track was never in the viewer's own library for /favorites to act
-// on.
-function togglePlayerLike(song) {
-  if (!song) return;
-
-  if (song._public) {
-    togglePublicSongLike(song);
-  } else {
-    toggleFavorite(song);
-  }
-}
-
-// Real, persisted like on a public Discover track, triggered from
-// the mini/full player's heart button. Mirrors toggleDiscoverLike()
-// above but refreshes the player's own heart icons instead of a
-// specific Discover list-row button, since the player can be
-// reached without that row ever having been rendered.
-async function togglePublicSongLike(song) {
-  try {
-    const data = await api(`/group-songs/${song.id}/like`, {
-      method: "POST"
-    });
-
-    song.liked = data.liked;
-    song.like_count = data.like_count;
-
-    // Keep the Discover list's own copy of this song in sync too, in
-    // case it's a different object reference (e.g. reached via
-    // search results), so the row reflects the same state if the
-    // user goes back to Discover without a full reload.
-    const discoverCopy = state.discoverSongs.find(
-      item => Number(item.id) === Number(song.id)
-    );
-
-    if (discoverCopy && discoverCopy !== song) {
-      discoverCopy.liked = data.liked;
-      discoverCopy.like_count = data.like_count;
-    }
-
-    updatePlayerLike();
-  } catch (error) {
-    console.error("Player like:", error);
-    alert(error.message || "Couldn't like this song.");
-  }
-}
-
 function updatePlayerLike() {
   if (!state.currentSong) return;
 
-  const song = state.currentSong;
-
-  const liked = song._public
-    ? !!song.liked
-    : state.favorites.some(
-        item => Number(item.id) === Number(song.id)
-      );
+  const liked =
+    state.favorites.some(
+      item =>
+        Number(item.id) ===
+        Number(state.currentSong.id)
+    );
 
   const miniLike = document.getElementById("miniLike");
   const playerLike = document.getElementById("playerLike");
