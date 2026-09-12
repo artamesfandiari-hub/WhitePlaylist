@@ -408,40 +408,6 @@ main { width: 100%; }
 .song-actions .song-action-add.added svg { fill: currentColor; stroke: currentColor; }
 .song-actions .song-action-add.loading { opacity: .5; pointer-events: none; }
 
-/* DISCOVER — real like button. Same 36px icon-button base; "liked"
-   reuses the existing filled-heart look. The wrap is `position:
-   relative` purely to anchor the transient like-count popup below
-   it — it doesn't change the button's own layout. */
-.discover-like-wrap { position: relative; }
-.song-action-like svg { width: 18px; height: 18px; }
-
-/* Transient "N likes" confirmation shown right after a tap, then
-   faded back out — see showLikeCountPopup() in app.js. Never a
-   persistent label; it's removed from the DOM once its fade-out
-   transition finishes. */
-.like-count-popup {
-  position: absolute;
-  top: -6px;
-  right: 0;
-  transform: translateY(-100%) scale(.92);
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: var(--surface-2, #222);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .25s var(--ease, ease), transform .25s var(--ease, ease);
-  z-index: 2;
-}
-
-.like-count-popup.show {
-  opacity: 1;
-  transform: translateY(-110%) scale(1);
-}
-
 .rank-badge {
   flex: 0 0 22px;
   width: 22px;
