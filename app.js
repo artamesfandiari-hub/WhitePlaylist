@@ -348,13 +348,6 @@ async function resolveTelegramLaunchContext() {
 
   if (!payload) return;
 
-  const discoverMatch = payload.match(/^discover_(\d+)$/);
-
-  if (discoverMatch) {
-    openSharedDiscoverSong(Number(discoverMatch[1]));
-    return;
-  }
-
   const playlistMatch = payload.match(
     /^playlist_([a-zA-Z0-9]+)$/
   );
@@ -382,37 +375,6 @@ async function resolveTelegramLaunchContext() {
   }
 
   openSharedPlaylist(shareToken);
-}
-
-// Recipient side of shareDiscoverSong() above: opens the Discover
-// page and plays the shared track. Looks in the already-loaded
-// catalog first (the common case); falls back to fetching that one
-// song directly (see getGroupSong on the backend) since the shared
-// track might not be among the latest ones the list normally loads.
-async function openSharedDiscoverSong(songId) {
-  showPage("discoverPage");
-
-  if (!state.discoverSongs.length) {
-    await loadDiscoverSongs().catch(console.error);
-  }
-
-  let song = state.discoverSongs.find(
-    item => Number(item.id) === songId
-  );
-
-  if (!song) {
-    try {
-      const data = await api(`/group-songs/${songId}`);
-      song = markPublic([data.song])[0];
-    } catch (error) {
-      console.error("Shared Discover track:", error);
-      return;
-    }
-  }
-
-  if (song) {
-    playSong(song, state.discoverSongs.length ? state.discoverSongs : [song]);
-  }
 }
 
 /* =========================================================
@@ -1114,17 +1076,13 @@ function renderDiscoverList(songs) {
   bindDiscoverSongButtons(container, songs);
 }
 
-// Same visual row as songHTML(), but swaps the old, non-functional
-// personal favorite/plus-check button for a real like button plus
-// the track's real, global play/like counts (see song_stats on the
-// backend) — "Add to Library"/Download/Share now live in the ⋯ menu
-// opened from the full player instead (see openSongActionsMenu()
-// below), since a public song isn't owned by the viewer.
+// Same visual row as songHTML(), but swaps the personal "⋯" menu
+// (favorite/add-to-playlist/delete — all acts on the viewer's own
+// library) for an explicit "Add to Library" button, since a public
+// song isn't owned by the viewer until they choose to copy it.
 function discoverSongHTML(song) {
   const artist = song.artist || "Unknown Artist";
-  const liked = !!song.viewer_liked;
-  const playCount = formatCompactNumber(song.play_count || 0);
-  const likeCount = formatCompactNumber(song.like_count || 0);
+  const album = song.album || "Unknown Album";
 
   return `
     <div class="song-item" data-song-id="${song.id}">
@@ -1151,21 +1109,19 @@ function discoverSongHTML(song) {
         <div class="song-meta">
           ${escapeHTML(artist)}
           •
-          ${playCount} plays
+          ${escapeHTML(album)}
         </div>
       </button>
 
       <div class="song-actions">
         <button
-          class="song-action-like${liked ? " liked" : ""}"
-          data-action="toggle-like"
+          class="song-action-add"
+          data-action="add-to-library"
           data-id="${song.id}"
-          aria-label="Like"
-          aria-pressed="${liked}"
+          aria-label="Add to Library"
         >
-          ${liked ? ICONS.heartFilled : ICONS.heart}
+          ${ICONS.plus}
         </button>
-        <span class="discover-like-count" data-role="like-count">${likeCount}</span>
       </div>
 
     </div>
@@ -1189,151 +1145,11 @@ function bindDiscoverSongButtons(container, songsList) {
       if (!song) return;
 
       if (action === "play") playSong(song, list);
-      if (action === "toggle-like") handleDiscoverLikeClick(song, button);
+      if (action === "add-to-library") addSongToLibrary(song, button);
     });
   });
 
   highlightPlayingRow();
-}
-
-// Row-level like click: toggles the real like via the API, then
-// updates this row's heart/count in place — the count fades out and
-// back in on the new value (see .discover-like-count.fading in
-// style.css) instead of just snapping to it.
-function handleDiscoverLikeClick(song, button) {
-  if (!button || button.disabled) return;
-
-  button.disabled = true;
-
-  toggleDiscoverLike(song).then(data => {
-    button.disabled = false;
-    if (!data) return;
-
-    button.classList.toggle("liked", !!data.liked);
-    button.innerHTML = data.liked ? ICONS.heartFilled : ICONS.heart;
-    button.setAttribute("aria-pressed", String(!!data.liked));
-
-    const countEl =
-      button.parentElement?.querySelector('[data-role="like-count"]');
-
-    if (countEl) {
-      animateDiscoverCount(countEl, formatCompactNumber(data.like_count));
-    }
-
-    if (
-      state.currentSong &&
-      Number(state.currentSong.id) === Number(song.id)
-    ) {
-      updatePlayerLike();
-      updatePlayerStats();
-    }
-  });
-}
-
-// Briefly fades a stat number out, swaps the text, then fades it
-// back in — used whenever a real like count changes on screen.
-function animateDiscoverCount(el, newText) {
-  el.classList.add("fading");
-
-  setTimeout(() => {
-    el.textContent = newText;
-    el.classList.remove("fading");
-  }, 180);
-}
-
-// Core like toggle shared by the Discover row button and the full
-// player's like button (see updatePlayerLike()/setupPlayer() below).
-// Keeps every in-memory copy of this song (the Discover list row and
-// state.currentSong, when they're different objects for the same
-// song) in sync with the server's real count.
-async function toggleDiscoverLike(song) {
-  if (!song?.id) return null;
-
-  try {
-    const data = await api(`/songs/${song.id}/like`, {
-      method: "POST"
-    });
-
-    song.viewer_liked = data.liked ? 1 : 0;
-    song.like_count = data.like_count;
-
-    const listedSong = state.discoverSongs.find(
-      item => Number(item.id) === Number(song.id)
-    );
-
-    if (listedSong && listedSong !== song) {
-      listedSong.viewer_liked = song.viewer_liked;
-      listedSong.like_count = song.like_count;
-    }
-
-    if (
-      state.currentSong &&
-      Number(state.currentSong.id) === Number(song.id) &&
-      state.currentSong !== song
-    ) {
-      state.currentSong.viewer_liked = song.viewer_liked;
-      state.currentSong.like_count = song.like_count;
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Toggle like:", error);
-    alert(error.message || "Couldn't update like.");
-    return null;
-  }
-}
-
-// Discover full-player ⋯ menu: real audio download (streamSong on
-// the backend honors ?download=1 with a real attachment response).
-function downloadDiscoverSong(song) {
-  if (!song?.id) return;
-
-  const url =
-    `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}&download=1`;
-
-  if (tg?.openLink) {
-    tg.openLink(url);
-    return;
-  }
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${song.title || "track"}.mp3`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-// Discover full-player ⋯ menu: shares a deep link straight to this
-// track (see buildDiscoverShareUrl/shareGroupSong on the backend and
-// the "discover_" start-param handling in resolveTelegramLaunchContext
-// below).
-async function shareDiscoverSong(song) {
-  if (!song?.id) return;
-
-  try {
-    const data = await api(`/group-songs/${song.id}/share`, {
-      method: "POST"
-    });
-
-    if (!data.share_url) return;
-
-    const text = "🎧 Check out this track on White Playlist";
-
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(
-        `https://t.me/share/url?url=${encodeURIComponent(data.share_url)}&text=${encodeURIComponent(text)}`
-      );
-    } else {
-      navigator.clipboard
-        ?.writeText(data.share_url)
-        .then(() => alert("Link copied."))
-        .catch(() => alert(data.share_url));
-    }
-  } catch (error) {
-    console.error("Share song:", error);
-    alert(error.message || "Couldn't share this track.");
-  }
 }
 
 // Explicit, user-initiated copy of one public song into the viewer's
@@ -1341,39 +1157,26 @@ async function shareDiscoverSong(song) {
 // called automatically by playback — only by this button tap. The
 // backend both creates the personal copy and prevents a duplicate if
 // this same song was already added in a previous session.
-// `button` is optional — when called from the Discover full-player
-// ⋯ menu (see songActionAddToLibrary below) there's no persistent
-// row button to update, so feedback is a plain alert() instead.
 async function addSongToLibrary(song, button) {
-  if (button?.disabled) return;
+  if (!button || button.disabled) return;
 
-  if (button) {
-    button.disabled = true;
-    button.classList.add("loading");
-  }
+  button.disabled = true;
+  button.classList.add("loading");
 
   try {
     const data = await api(`/group-songs/${song.id}/add-to-library`, {
       method: "POST"
     });
 
-    if (button) {
-      button.classList.remove("loading");
-      button.classList.add("added");
-      button.innerHTML = ICONS.check;
-      button.setAttribute(
-        "aria-label",
-        data.already_in_library
-          ? "Already in your library"
-          : "Added to your library"
-      );
-    } else {
-      alert(
-        data.already_in_library
-          ? "Already in your library."
-          : "Added to your library."
-      );
-    }
+    button.classList.remove("loading");
+    button.classList.add("added");
+    button.innerHTML = ICONS.check;
+    button.setAttribute(
+      "aria-label",
+      data.already_in_library
+        ? "Already in your library"
+        : "Added to your library"
+    );
 
     // The personal library changed — refresh Songs/Recently Added so
     // the new copy shows up there without a full app reload. This
@@ -1382,10 +1185,8 @@ async function addSongToLibrary(song, button) {
   } catch (error) {
     console.error("Add to library:", error);
 
-    if (button) {
-      button.disabled = false;
-      button.classList.remove("loading");
-    }
+    button.disabled = false;
+    button.classList.remove("loading");
     alert(error.message || "Couldn't add this song to your library.");
   }
 }
@@ -1458,47 +1259,14 @@ function openSongActionsMenu(song, context = {}) {
   const titleEl = document.getElementById("songActionsTitle");
   const favoriteBtn = document.getElementById("songActionFavorite");
   const favoriteLabel = document.getElementById("songActionFavoriteLabel");
-  const playlistBtn = document.getElementById("songActionPlaylist");
-  const forwardBtn = document.getElementById("songActionForward");
   const deleteBtn = document.getElementById("songActionDelete");
   const removeFromPlaylistBtn = document.getElementById(
     "songActionRemoveFromPlaylist"
   );
-  const downloadBtn = document.getElementById("songActionDownload");
-  const addToLibraryBtn = document.getElementById("songActionAddToLibrary");
-  const shareBtn = document.getElementById("songActionShare");
 
   if (!modal || !titleEl || !favoriteBtn || !favoriteLabel) return;
 
   titleEl.textContent = song.title || "Song";
-
-  // Discover/public tracks aren't owned by the viewer, so none of the
-  // personal-library items below apply to them — see
-  // discoverSongHTML()/addSongToLibrary() above for the row-level
-  // equivalent of Add to Library, and downloadDiscoverSong()/
-  // shareDiscoverSong() for the two new actions.
-  const isDiscoverContext =
-    context?.type === "discover" || !!song._public;
-
-  if (downloadBtn) downloadBtn.classList.toggle("hidden", !isDiscoverContext);
-  if (addToLibraryBtn) {
-    addToLibraryBtn.classList.toggle("hidden", !isDiscoverContext);
-  }
-  if (shareBtn) shareBtn.classList.toggle("hidden", !isDiscoverContext);
-
-  if (isDiscoverContext) {
-    favoriteBtn.classList.add("hidden");
-    if (playlistBtn) playlistBtn.classList.add("hidden");
-    if (forwardBtn) forwardBtn.classList.add("hidden");
-    if (deleteBtn) deleteBtn.classList.add("hidden");
-    if (removeFromPlaylistBtn) removeFromPlaylistBtn.classList.add("hidden");
-
-    modal.classList.remove("hidden");
-    return;
-  }
-
-  if (playlistBtn) playlistBtn.classList.remove("hidden");
-  if (forwardBtn) forwardBtn.classList.remove("hidden");
 
   const liked =
     state.favorites.some(
@@ -2546,30 +2314,6 @@ function setupModals() {
     });
 
   document
-    .getElementById("songActionDownload")
-    ?.addEventListener("click", () => {
-      const song = selectedSongForMenu;
-      closeSongActionsMenu();
-      if (song) downloadDiscoverSong(song);
-    });
-
-  document
-    .getElementById("songActionAddToLibrary")
-    ?.addEventListener("click", () => {
-      const song = selectedSongForMenu;
-      closeSongActionsMenu();
-      if (song) addSongToLibrary(song);
-    });
-
-  document
-    .getElementById("songActionShare")
-    ?.addEventListener("click", () => {
-      const song = selectedSongForMenu;
-      closeSongActionsMenu();
-      if (song) shareDiscoverSong(song);
-    });
-
-  document
     .getElementById("songActionRemoveFromPlaylist")
     ?.addEventListener("click", () => {
       const song = selectedSongForMenu;
@@ -2833,7 +2577,7 @@ function setupPlayer() {
     .getElementById("miniLike")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        handlePlayerLikeClick(state.currentSong);
+        toggleFavorite(state.currentSong);
       }
     });
 
@@ -2845,9 +2589,7 @@ function setupPlayer() {
     .getElementById("playerMenuButton")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        openSongActionsMenu(state.currentSong, {
-          type: state.currentSong._public ? "discover" : "player"
-        });
+        openSongActionsMenu(state.currentSong, { type: "player" });
       }
     });
 
@@ -2859,7 +2601,7 @@ function setupPlayer() {
     .getElementById("playerLike")
     .addEventListener("click", () => {
       if (state.currentSong) {
-        handlePlayerLikeClick(state.currentSong);
+        toggleFavorite(state.currentSong);
       }
     });
 
@@ -3231,7 +2973,6 @@ function updatePlayerUI() {
   miniPlayer.classList.remove("hidden");
 
   updatePlayerLike();
-  updatePlayerStats();
   updatePlayButtons();
   highlightPlayingRow();
 
@@ -3247,17 +2988,12 @@ function updatePlayerUI() {
 function updatePlayerLike() {
   if (!state.currentSong) return;
 
-  const song = state.currentSong;
-
-  // Discover/public tracks use the real, global like system
-  // (song.viewer_liked, kept in sync by toggleDiscoverLike()) instead
-  // of the personal Favorites list, which they were never part of.
   const liked =
-    song._public
-      ? !!song.viewer_liked
-      : state.favorites.some(
-          item => Number(item.id) === Number(song.id)
-        );
+    state.favorites.some(
+      item =>
+        Number(item.id) ===
+        Number(state.currentSong.id)
+    );
 
   const miniLike = document.getElementById("miniLike");
   const playerLike = document.getElementById("playerLike");
@@ -3273,52 +3009,6 @@ function updatePlayerLike() {
 
   miniLike.setAttribute("aria-pressed", String(liked));
   playerLike.setAttribute("aria-pressed", String(liked));
-}
-
-// Discover-only real play/like counts shown under the artist name in
-// the full player — hidden entirely for personal-library songs.
-function updatePlayerStats() {
-  const statsEl = document.getElementById("playerStats");
-  if (!statsEl) return;
-
-  const song = state.currentSong;
-
-  if (!song || !song._public) {
-    statsEl.classList.add("hidden");
-    return;
-  }
-
-  const playCountEl = document.getElementById("playerPlayCount");
-  const likeCountEl = document.getElementById("playerLikeCount");
-
-  if (playCountEl) {
-    playCountEl.textContent =
-      `${formatCompactNumber(song.play_count || 0)} plays`;
-  }
-
-  if (likeCountEl) {
-    likeCountEl.textContent =
-      `${formatCompactNumber(song.like_count || 0)} likes`;
-  }
-
-  statsEl.classList.remove("hidden");
-}
-
-// Mini/full player like button: real Discover like for a public
-// track, the existing personal Favorite toggle for everything else.
-function handlePlayerLikeClick(song) {
-  if (!song) return;
-
-  if (!song._public) {
-    toggleFavorite(song);
-    return;
-  }
-
-  toggleDiscoverLike(song).then(data => {
-    if (!data) return;
-    updatePlayerLike();
-    updatePlayerStats();
-  });
 }
 
 function updatePlayButtons() {
@@ -4353,6 +4043,16 @@ function renderLyricsLine(index) {
   const words = text.split(/\s+/).filter(Boolean);
   const wordsHtml = buildLyricsWordsHtml(words);
 
+  // Clear the previous line and force a reflow before writing the
+  // new one. Without this, on some WebKit WebViews the font-size
+  // write below and the innerHTML write just after it can land in
+  // the same paint, and the previous line's glyphs occasionally
+  // survive that paint for a frame — visually looking like two lines
+  // (one of them warped) stacked on top of each other. Splitting the
+  // clear into its own forced layout closes that window.
+  track.innerHTML = "";
+  void track.offsetHeight;
+
   // Work out this line's font size against an offscreen probe BEFORE
   // the animated word spans ever touch the live track — see
   // measureLyricsFontSize()'s comment for why that ordering is the
@@ -4669,20 +4369,6 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-// Compact display for Discover's real play/like counts — 950,
-// 12500 -> "12.5K", 3400000 -> "3.4M".
-function formatCompactNumber(value) {
-  const n = Number(value) || 0;
-
-  if (n < 1000) return String(n);
-
-  if (n < 1000000) {
-    return (n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, "") + "K";
-  }
-
-  return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
 }
 
 /* =========================================================

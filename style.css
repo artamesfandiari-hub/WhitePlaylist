@@ -399,38 +399,14 @@ main { width: 100%; }
 .song-actions .liked svg { fill: currentColor; stroke: currentColor; }
 .song-menu-btn svg { width: 18px; height: 18px; }
 
-/* DISCOVER — real like button + count (replaces the old, non-
-   functional favorite/plus-check row button). Same 36px icon-button
-   base as every other .song-actions button above via .liked for the
-   filled state. The count fades out/in on every toggle (see
-   animateDiscoverCount() in app.js) instead of just snapping to the
-   new number. */
-.song-action-like svg { width: 18px; height: 18px; }
-
-.discover-like-count {
-  min-width: 20px;
-  font-size: 12px;
-  color: var(--text-muted);
-  transition: opacity 180ms var(--ease);
-}
-
-.discover-like-count.fading { opacity: 0; }
-.song-actions .song-action-like.liked ~ .discover-like-count { color: #fff; }
-
-/* FULL PLAYER — Discover-only real play/like counts, shown under the
-   artist name (see #playerStats in index.html / updatePlayerStats()
-   in app.js). Hidden entirely for personal-library songs. */
-.player-stats {
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.player-stats-dot { opacity: .6; }
+/* DISCOVER — "Add to Library" row button (replaces the personal ⋯
+   menu on public songs). Same 36px icon-button base as every other
+   .song-actions button above; only the "added" success state and
+   in-flight "loading" state are new. */
+.song-action-add svg { width: 18px; height: 18px; }
+.song-actions .song-action-add.added { color: #fff; }
+.song-actions .song-action-add.added svg { fill: currentColor; stroke: currentColor; }
+.song-actions .song-action-add.loading { opacity: .5; pointer-events: none; }
 
 .rank-badge {
   flex: 0 0 22px;
@@ -1132,6 +1108,19 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   justify-content: center;
   overflow: hidden;
   position: relative;
+  /* Isolates this box's painting from the rest of the player and
+     forces its own compositor layer. Without this, some WebKit
+     WebViews (notably Telegram's in-app browser on iOS) can leave a
+     stale frame of the *previous* line's glyphs on screen for a
+     moment when the font-size and word content both change in the
+     same tick (see renderLyricsLine()/measureLyricsFontSize() in
+     app.js) — the two lines then briefly appear stacked/overlapping,
+     one of them warped, until the next repaint. contain: paint stops
+     that stale content from being able to bleed outside this box's
+     bounds, and translateZ(0) promotes it to its own layer so the
+     swap is a clean layer replace instead of an in-place repaint. */
+  contain: paint;
+  transform: translateZ(0);
 }
 
 .player-lyrics-track {
