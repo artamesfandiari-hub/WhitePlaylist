@@ -255,11 +255,32 @@ async function api(endpoint, options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const response =
-    await fetch(`${API}${endpoint}`, {
-      ...options,
-      headers
-    });
+  // Bare fetch() has no timeout of its own — on a weak/dropped
+  // connection (common inside Telegram's in-app browser) a request
+  // can just hang forever, which reads as the whole app being frozen
+  // (a "Loading..." skeleton that never resolves) rather than a
+  // failed request the caller could retry. Capping it means a stuck
+  // request surfaces as a normal, catchable error instead.
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 20000);
+
+  let response;
+
+  try {
+    response =
+      await fetch(`${API}${endpoint}`, {
+        ...options,
+        headers,
+        signal: options.signal || timeoutController.signal
+      });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   let data;
 
@@ -2324,6 +2345,66 @@ async function openAddToPlaylist(song) {
    PLAYER
    ========================================================= */
 
+/* =========================================================
+   PLAYBACK RESILIENCE
+   ----------------------------------------------------------------
+   Reloads the current song from where it left off and resumes
+   playback, capped at AUDIO_RETRY_LIMIT attempts with a short
+   backoff, instead of letting a transient network blip or a silent
+   stall kill playback outright. See the "error"/"waiting" listeners
+   in setupPlayer() for where this gets triggered.
+   ========================================================= */
+
+const AUDIO_RETRY_LIMIT = 3;
+const AUDIO_STALL_TIMEOUT_MS = 8000;
+
+let audioRetryCount = 0;
+let audioRetrySongId = null;
+let audioStallTimer = null;
+
+function clearAudioStallTimer() {
+  if (audioStallTimer) {
+    clearTimeout(audioStallTimer);
+    audioStallTimer = null;
+  }
+}
+
+function retryPlaybackFromError() {
+  const song = state.currentSong;
+  if (!song) return;
+
+  if (audioRetrySongId !== song.id) {
+    audioRetrySongId = song.id;
+    audioRetryCount = 0;
+  }
+
+  if (audioRetryCount >= AUDIO_RETRY_LIMIT) {
+    // Repeated failures on this same song — stop hammering the same
+    // dead connection and move on rather than getting stuck here
+    // indefinitely.
+    console.error("Playback: giving up after repeated errors, skipping");
+    audioRetryCount = 0;
+    nextSong();
+    return;
+  }
+
+  audioRetryCount++;
+
+  const resumeAt = audio.currentTime || 0;
+  const delay = Math.min(1000 * audioRetryCount, 4000);
+
+  setTimeout(() => {
+    // The user may have already moved on to a different song while
+    // this backoff was pending — don't stomp on their new selection.
+    if (!state.currentSong || state.currentSong.id !== song.id) return;
+
+    audio.src =
+      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+    audio.currentTime = resumeAt;
+    audio.play().catch(err => console.error("Playback retry:", err));
+  }, delay);
+}
+
 function setupPlayer() {
   updatePlaybackModeButton();
   setupLyricsResize();
@@ -2422,6 +2503,36 @@ function setupPlayer() {
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
 
+  // Mobile connections (especially inside Telegram's in-app browser)
+  // routinely drop or stall mid-stream. Without this, the <audio>
+  // element's "error" event just left playback dead with no recovery
+  // and no feedback, and a long "waiting" stall was indistinguishable
+  // from the app being frozen — both are what "playback cuts out"
+  // reports were actually caused by, not the buffering itself.
+  audio.addEventListener("error", () => {
+    console.error("Playback: audio element error", audio.error);
+    clearAudioStallTimer();
+    retryPlaybackFromError();
+  });
+
+  audio.addEventListener("waiting", () => {
+    clearAudioStallTimer();
+    audioStallTimer = setTimeout(() => {
+      // Still stuck after AUDIO_STALL_TIMEOUT_MS with no recovery —
+      // the connection to the Worker likely died silently (no
+      // "error" event fires for that). Treat it the same as a hard
+      // error instead of leaving playback buffering forever.
+      if (!state.currentSong || audio.paused) return;
+      console.error("Playback: stalled, retrying");
+      retryPlaybackFromError();
+    }, AUDIO_STALL_TIMEOUT_MS);
+  });
+
+  audio.addEventListener("playing", () => {
+    clearAudioStallTimer();
+    audioRetryCount = 0;
+  });
+
   // Waveform canvas is sized off its own rendered box, so it needs a
   // repaint (not a recompute) whenever the layout changes.
   window.addEventListener("resize", redrawWaveformProgress);
@@ -2476,6 +2587,14 @@ function startPlayback(song) {
     updatePlayerUI();
     return;
   }
+
+  // A manual song change (next/previous/tap) supersedes any retry
+  // that might still be pending for whatever was playing before —
+  // without this, a stale retry could fire mid-backoff and stomp on
+  // the song the user just picked.
+  clearAudioStallTimer();
+  audioRetryCount = 0;
+  audioRetrySongId = song.id;
 
   state.currentSong = song;
 
