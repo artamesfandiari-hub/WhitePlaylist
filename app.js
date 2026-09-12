@@ -1103,7 +1103,7 @@ function formatPlaysLikes(song) {
 function discoverSongHTML(song) {
   const artist = song.artist || "Unknown Artist";
   const album = song.album || "Unknown Album";
-  const stats = formatPlaysLikes(song);
+  const liked = !!song.liked;
 
   return `
     <div class="song-item" data-song-id="${song.id}">
@@ -1131,18 +1131,17 @@ function discoverSongHTML(song) {
           ${escapeHTML(artist)}
           •
           ${escapeHTML(album)}
-          ${stats ? `• ${escapeHTML(stats)}` : ""}
         </div>
       </button>
 
-      <div class="song-actions">
+      <div class="song-actions discover-like-wrap">
         <button
-          class="song-action-add"
-          data-action="add-to-library"
+          class="song-action-like ${liked ? "liked" : ""}"
+          data-action="like"
           data-id="${song.id}"
-          aria-label="Add to Library"
+          aria-label="${liked ? "Unlike" : "Like"}"
         >
-          ${ICONS.plus}
+          ${liked ? ICONS.heartFilled : ICONS.heart}
         </button>
       </div>
 
@@ -1167,38 +1166,115 @@ function bindDiscoverSongButtons(container, songsList) {
       if (!song) return;
 
       if (action === "play") playSong(song, list);
-      if (action === "add-to-library") addSongToLibrary(song, button);
+      if (action === "like") toggleDiscoverLike(song, button);
     });
   });
 
   highlightPlayingRow();
 }
 
-// Explicit, user-initiated copy of one public song into the viewer's
-// own personal library (POST /group-songs/:id/add-to-library). Never
-// called automatically by playback — only by this button tap. The
-// backend both creates the personal copy and prevents a duplicate if
-// this same song was already added in a previous session.
-async function addSongToLibrary(song, button) {
+// Real, persisted like on a public Discover track (POST
+// /group-songs/:id/like — toggles server-side, backed by its own
+// song_likes table, completely separate from the personal
+// favorites flow which only ever works on songs the viewer owns).
+// On success, briefly shows the track's actual up-to-date like
+// count next to the button, then fades it back out.
+async function toggleDiscoverLike(song, button) {
   if (!button || button.disabled) return;
 
   button.disabled = true;
-  button.classList.add("loading");
+
+  try {
+    const data = await api(`/group-songs/${song.id}/like`, {
+      method: "POST"
+    });
+
+    song.liked = data.liked;
+    song.like_count = data.like_count;
+
+    button.classList.toggle("liked", data.liked);
+    button.innerHTML = data.liked ? ICONS.heartFilled : ICONS.heart;
+    button.setAttribute(
+      "aria-label",
+      data.liked ? "Unlike" : "Like"
+    );
+
+    showLikeCountPopup(button, data.like_count);
+  } catch (error) {
+    console.error("Discover like:", error);
+    alert(error.message || "Couldn't like this song.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// Shows "<n> likes" right next to the like button and fades it out
+// shortly after — a transient confirmation, not a persistent label,
+// since the Discover list itself no longer keeps a static like/play
+// count next to the track name.
+function showLikeCountPopup(button, count) {
+  const wrap = button.closest(".discover-like-wrap");
+  if (!wrap) return;
+
+  wrap.querySelector(".like-count-popup")?.remove();
+
+  const popup = document.createElement("span");
+  popup.className = "like-count-popup";
+  popup.textContent = `${count} like${count === 1 ? "" : "s"}`;
+  wrap.appendChild(popup);
+
+  // Force layout so the very next class toggle still triggers a
+  // transition, even if a previous popup was just removed above.
+  void popup.offsetWidth;
+  popup.classList.add("show");
+
+  setTimeout(() => {
+    popup.classList.remove("show");
+    popup.addEventListener(
+      "transitionend",
+      () => popup.remove(),
+      { once: true }
+    );
+  }, 900);
+}
+
+// Explicit, user-initiated copy of one public song into the viewer's
+// own personal library (POST /group-songs/:id/add-to-library). Never
+// called automatically by playback — only by an explicit tap, either
+// this function's own caller (the Discover full-player's ⋯ menu — see
+// openSongActionsMenu()) or, when a button is passed, a row-level
+// control. The backend both creates the personal copy and prevents a
+// duplicate if this same song was already added in a previous session.
+async function addSongToLibrary(song, button) {
+  if (button && button.disabled) return;
+
+  if (button) {
+    button.disabled = true;
+    button.classList.add("loading");
+  }
 
   try {
     const data = await api(`/group-songs/${song.id}/add-to-library`, {
       method: "POST"
     });
 
-    button.classList.remove("loading");
-    button.classList.add("added");
-    button.innerHTML = ICONS.check;
-    button.setAttribute(
-      "aria-label",
-      data.already_in_library
-        ? "Already in your library"
-        : "Added to your library"
-    );
+    if (button) {
+      button.classList.remove("loading");
+      button.classList.add("added");
+      button.innerHTML = ICONS.check;
+      button.setAttribute(
+        "aria-label",
+        data.already_in_library
+          ? "Already in your library"
+          : "Added to your library"
+      );
+    } else {
+      alert(
+        data.already_in_library
+          ? "Already in your library."
+          : "Added to your library."
+      );
+    }
 
     // The personal library changed — refresh Songs/Recently Added so
     // the new copy shows up there without a full app reload. This
@@ -1207,9 +1283,53 @@ async function addSongToLibrary(song, button) {
   } catch (error) {
     console.error("Add to library:", error);
 
-    button.disabled = false;
-    button.classList.remove("loading");
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("loading");
+    }
     alert(error.message || "Couldn't add this song to your library.");
+  }
+}
+
+// Downloads a public Discover track's actual audio file to the
+// device, reusing the exact same streaming endpoint playback uses
+// (GET /audio/:id) — fetched fully as a blob so the browser/Telegram
+// WebView can save real bytes under a real filename, rather than just
+// opening the stream inline.
+async function downloadSong(song) {
+  if (!song?.id) return;
+
+  try {
+    const url =
+      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("Couldn't download this song.");
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const ext =
+      (song.mime_type && song.mime_type.split("/")[1]) || "mp3";
+
+    const safeTitle =
+      (song.title || "song").replace(/[\\/:*?"<>|]+/g, "").trim() ||
+      "song";
+
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${safeTitle}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+  } catch (error) {
+    console.error("Download:", error);
+    alert(error.message || "Couldn't download this song.");
   }
 }
 
@@ -1281,14 +1401,25 @@ function openSongActionsMenu(song, context = {}) {
   const titleEl = document.getElementById("songActionsTitle");
   const favoriteBtn = document.getElementById("songActionFavorite");
   const favoriteLabel = document.getElementById("songActionFavoriteLabel");
+  const playlistBtn = document.getElementById("songActionPlaylist");
   const deleteBtn = document.getElementById("songActionDelete");
   const removeFromPlaylistBtn = document.getElementById(
     "songActionRemoveFromPlaylist"
   );
+  const downloadBtn = document.getElementById("songActionDownload");
+  const addToLibraryBtn = document.getElementById("songActionAddToLibrary");
+  const forwardLabel = document.getElementById("songActionForwardLabel");
 
   if (!modal || !titleEl || !favoriteBtn || !favoriteLabel) return;
 
   titleEl.textContent = song.title || "Song";
+
+  // A Discover/public track (only ever reachable here via the full
+  // player — see playerMenuButton's click handler below) isn't owned
+  // by the viewer yet, so none of the personal-library actions
+  // (Favorite, Add to Playlist, Delete, Remove from Playlist) apply.
+  // It gets its own set instead: Download, Add to Library, Share.
+  const isPublicSong = !!song._public;
 
   const liked =
     state.favorites.some(
@@ -1302,19 +1433,41 @@ function openSongActionsMenu(song, context = {}) {
   // so the ⋯ menu opened from there skips the redundant Favorite
   // entry. Every other ⋯ menu (song lists, playlists, search, etc.)
   // is unaffected — it only hides here when context.type === "player".
-  favoriteBtn.classList.toggle("hidden", context?.type === "player");
+  favoriteBtn.classList.toggle(
+    "hidden",
+    isPublicSong || context?.type === "player"
+  );
+
+  if (playlistBtn) {
+    playlistBtn.classList.toggle("hidden", isPublicSong);
+  }
 
   const isPlaylistContext = context?.type === "playlist";
 
   if (deleteBtn) {
-    deleteBtn.classList.toggle("hidden", isPlaylistContext);
+    deleteBtn.classList.toggle("hidden", isPublicSong || isPlaylistContext);
   }
 
   if (removeFromPlaylistBtn) {
     removeFromPlaylistBtn.classList.toggle(
       "hidden",
-      !isPlaylistContext
+      isPublicSong || !isPlaylistContext
     );
+  }
+
+  if (downloadBtn) {
+    downloadBtn.classList.toggle("hidden", !isPublicSong);
+  }
+
+  if (addToLibraryBtn) {
+    addToLibraryBtn.classList.toggle("hidden", !isPublicSong);
+  }
+
+  // "Forward" (Telegram's own recipient picker) already IS a real
+  // share action — Discover just calls it "Share" since there's no
+  // personal-library context to forward *from* here.
+  if (forwardLabel) {
+    forwardLabel.textContent = isPublicSong ? "Share" : "Forward";
   }
 
   modal.classList.remove("hidden");
@@ -2333,6 +2486,22 @@ function setupModals() {
       const song = selectedSongForMenu;
       closeSongActionsMenu();
       if (song) forwardSong(song);
+    });
+
+  document
+    .getElementById("songActionDownload")
+    ?.addEventListener("click", () => {
+      const song = selectedSongForMenu;
+      closeSongActionsMenu();
+      if (song) downloadSong(song);
+    });
+
+  document
+    .getElementById("songActionAddToLibrary")
+    ?.addEventListener("click", () => {
+      const song = selectedSongForMenu;
+      closeSongActionsMenu();
+      if (song) addSongToLibrary(song);
     });
 
   document
