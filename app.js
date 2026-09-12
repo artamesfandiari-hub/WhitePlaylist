@@ -58,7 +58,6 @@ const state = {
       : null,
 
   songs: [],
-  discoverSongs: [],
   favorites: [],
   artists: [],
   albums: [],
@@ -236,12 +235,6 @@ const ICONS = {
       <circle cx="12" cy="12" r="2"></circle>
       <circle cx="19" cy="12" r="2"></circle>
     </svg>
-  `,
-
-  check: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <polyline points="4 12 9 17 20 6"></polyline>
-    </svg>
   `
 };
 
@@ -297,7 +290,6 @@ async function init() {
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
-  setupDiscoverNavigation();
 
   renderHomeGreeting();
 
@@ -309,7 +301,6 @@ async function init() {
 
   await Promise.allSettled([
     loadSongs(),
-    loadDiscoverSongs(),
     loadFavorites(),
     loadArtists(),
     loadAlbums(),
@@ -624,28 +615,6 @@ function renderContinueListening() {
 
   bindSongButtons(container, state.recentlyPlayed);
   showHomeSection("continueListeningSection", true);
-  updateContinueCardPlayState();
-}
-
-/* Keeps the Continue Listening button's icon in sync with real
-   playback: shows pause only while its own song is the one actually
-   playing, play otherwise (including when it's the current song but
-   paused). Safe to call any time — no-ops if the card isn't rendered. */
-function updateContinueCardPlayState() {
-  const card = document.querySelector("#continueListeningCard .continue-card");
-  if (!card) return;
-
-  const playSpan = card.querySelector(".continue-play");
-  if (!playSpan) return;
-
-  const isThisSong =
-    !!state.currentSong &&
-    Number(state.currentSong.id) === Number(card.dataset.id);
-
-  const showPause = isThisSong && state.isPlaying;
-
-  playSpan.innerHTML = showPause ? ICONS.pause : ICONS.play;
-  playSpan.classList.toggle("is-pause", showPause);
 }
 
 /* RECENTLY PLAYED — real listening history (skips the first item,
@@ -1021,247 +990,6 @@ function findSong(id) {
   return state.songs.find(
     song => Number(song.id) === Number(id)
   );
-}
-
-/* =========================================================
-   DISCOVER (public music)
-   A second, fully separate catalog inside the app: public songs
-   posted to the bot in any Telegram group, shared identically to
-   every user (never filtered per-viewer — see GET /group-songs on
-   the backend). Kept strictly apart from the personal library above:
-   these songs are never auto-added to Songs/Favorites/Smart
-   Mix/search/Recently Played just by being played here — only an
-   explicit tap on "Add to Library" (addSongToLibrary() below) copies
-   one into the viewer's own library. Playback reuses the exact same
-   <audio> element/queue/full-player as the personal library; no
-   second player is created.
-   ========================================================= */
-
-async function loadDiscoverSongs() {
-  try {
-    const data = await api("/group-songs?limit=200");
-
-    state.discoverSongs = markPublic(data.songs);
-
-    renderDiscoverList(state.discoverSongs);
-  } catch (error) {
-    console.error("Discover:", error);
-
-    showError("discoverList", "Couldn't load public tracks.");
-  }
-}
-
-// Tags each song object as public/non-personal (see the _public
-// check in startPlayback() below) without touching anything the
-// server sent — a plain client-side marker, never persisted.
-function markPublic(songs) {
-  return (songs || []).map(song => ({ ...song, _public: true }));
-}
-
-// Renders whichever song list is currently active on the Discover
-// page — either the full public catalog (loadDiscoverSongs above) or
-// a filtered result set (searchDiscover below). `songs` is also the
-// queue context handed to playSong() when a row is tapped.
-function renderDiscoverList(songs) {
-  const container = document.getElementById("discoverList");
-  if (!container) return;
-
-  if (!songs.length) {
-    container.innerHTML =
-      `<div class="empty">No public tracks yet</div>`;
-    return;
-  }
-
-  container.innerHTML = songs.map(discoverSongHTML).join("");
-  bindDiscoverSongButtons(container, songs);
-}
-
-// Same visual row as songHTML(), but swaps the personal "⋯" menu
-// (favorite/add-to-playlist/delete — all acts on the viewer's own
-// library) for an explicit "Add to Library" button, since a public
-// song isn't owned by the viewer until they choose to copy it.
-// Formats a song's global play/like counts as "12 plays · 3 likes",
-// singular where the count is exactly 1, and skipping a side
-// entirely when its number is missing (older cached data, or an
-// endpoint that doesn't return it) rather than showing a false "0".
-function formatPlaysLikes(song) {
-  const parts = [];
-
-  if (song.play_count !== undefined && song.play_count !== null) {
-    const n = Number(song.play_count) || 0;
-    parts.push(`${n} play${n === 1 ? "" : "s"}`);
-  }
-
-  if (song.like_count !== undefined && song.like_count !== null) {
-    const n = Number(song.like_count) || 0;
-    parts.push(`${n} like${n === 1 ? "" : "s"}`);
-  }
-
-  return parts.join(" · ");
-}
-
-function discoverSongHTML(song) {
-  const artist = song.artist || "Unknown Artist";
-  const album = song.album || "Unknown Album";
-  const stats = formatPlaysLikes(song);
-
-  return `
-    <div class="song-item" data-song-id="${song.id}">
-
-      <button
-        class="song-cover"
-        data-action="play"
-        data-id="${song.id}"
-        aria-label="Play ${escapeHTML(song.title || "song")}"
-      >
-        ${coverInnerHTML(song.cover_url, song.title)}
-      </button>
-
-      <button
-        class="song-info"
-        data-action="play"
-        data-id="${song.id}"
-        style="text-align:left"
-      >
-        <div class="song-title">
-          ${escapeHTML(song.title || "Unknown")}
-        </div>
-
-        <div class="song-meta">
-          ${escapeHTML(artist)}
-          •
-          ${escapeHTML(album)}
-          ${stats ? `• ${escapeHTML(stats)}` : ""}
-        </div>
-      </button>
-
-      <div class="song-actions">
-        <button
-          class="song-action-add"
-          data-action="add-to-library"
-          data-id="${song.id}"
-          aria-label="Add to Library"
-        >
-          ${ICONS.plus}
-        </button>
-      </div>
-
-    </div>
-  `;
-}
-
-function bindDiscoverSongButtons(container, songsList) {
-  if (!container) return;
-
-  const list = Array.isArray(songsList) ? songsList : state.discoverSongs;
-
-  container.querySelectorAll("[data-action]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const action = button.dataset.action;
-      const id = Number(button.dataset.id);
-      const song = list.find(item => Number(item.id) === id);
-
-      if (!song) return;
-
-      if (action === "play") playSong(song, list);
-      if (action === "add-to-library") addSongToLibrary(song, button);
-    });
-  });
-
-  highlightPlayingRow();
-}
-
-// Explicit, user-initiated copy of one public song into the viewer's
-// own personal library (POST /group-songs/:id/add-to-library). Never
-// called automatically by playback — only by this button tap. The
-// backend both creates the personal copy and prevents a duplicate if
-// this same song was already added in a previous session.
-async function addSongToLibrary(song, button) {
-  if (!button || button.disabled) return;
-
-  button.disabled = true;
-  button.classList.add("loading");
-
-  try {
-    const data = await api(`/group-songs/${song.id}/add-to-library`, {
-      method: "POST"
-    });
-
-    button.classList.remove("loading");
-    button.classList.add("added");
-    button.innerHTML = ICONS.check;
-    button.setAttribute(
-      "aria-label",
-      data.already_in_library
-        ? "Already in your library"
-        : "Added to your library"
-    );
-
-    // The personal library changed — refresh Songs/Recently Added so
-    // the new copy shows up there without a full app reload. This
-    // never touches the Discover list itself.
-    loadSongs().catch(console.error);
-  } catch (error) {
-    console.error("Add to library:", error);
-
-    button.disabled = false;
-    button.classList.remove("loading");
-    alert(error.message || "Couldn't add this song to your library.");
-  }
-}
-
-/* =========================================================
-   DISCOVER NAVIGATION + SEARCH
-   (a real top-level page/view of its own, reached via its own
-   bottom-nav tab like Songs/Favorites/Artists — see #discoverPage
-   in index.html and the generic nav-item handling in
-   setupNavigation(). Its search box queries only the public
-   catalog via GET /group-songs?q=..., completely separate from the
-   personal search() function/searchPage above.)
-   ========================================================= */
-
-function setupDiscoverNavigation() {
-  setupDiscoverSearch();
-}
-
-let discoverSearchTimer;
-
-function setupDiscoverSearch() {
-  const input = document.getElementById("discoverSearchInput");
-  if (!input) return;
-
-  input.addEventListener("input", () => {
-    clearTimeout(discoverSearchTimer);
-
-    discoverSearchTimer = setTimeout(
-      () => searchDiscover(input.value),
-      350
-    );
-  });
-}
-
-async function searchDiscover(query) {
-  const q = query.trim();
-
-  // Cleared search: go back to browsing the full public catalog
-  // already loaded by loadDiscoverSongs(), no extra request needed.
-  if (!q) {
-    renderDiscoverList(state.discoverSongs);
-    return;
-  }
-
-  try {
-    const data =
-      await api(`/group-songs?limit=200&q=${encodeURIComponent(q)}`);
-
-    renderDiscoverList(markPublic(data.songs));
-  } catch (error) {
-    console.error("Discover search:", error);
-    showError("discoverList", "Couldn't search public tracks.");
-  }
 }
 
 /* =========================================================
@@ -2672,97 +2400,9 @@ function setupPlayer() {
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
 
-  setupPlaybackRecovery();
-
   // Waveform canvas is sized off its own rendered box, so it needs a
   // repaint (not a recompute) whenever the layout changes.
   window.addEventListener("resize", redrawWaveformProgress);
-}
-
-// Two separate glitches that both showed up to users as "the sound
-// just cuts off/pauses for no reason":
-//
-// 1. The audio comes from streamSong() on the Worker, which itself
-//    proxies the bytes live from Telegram's file servers. On a shaky
-//    mobile connection that upstream fetch can stall mid-buffer; the
-//    <audio> element then just sits there "waiting" forever with no
-//    built-in retry, so playback silently never resumes.
-// 2. Telegram suspends a Mini App's WebView (and anything it's
-//    doing, including an in-flight audio fetch) whenever the app is
-//    minimized/backgrounded — e.g. the user switches to another chat
-//    or the screen locks — and does not resume it automatically when
-//    the app is foregrounded again, even though nothing ever fired a
-//    normal "pause" event to say so.
-//
-// Both are handled the same way: notice the audio element isn't
-// actually advancing when it should be, and kick it back into a
-// working state by reloading the current track from where it left
-// off and resuming playback.
-let stallRecoveryTimer = null;
-
-function scheduleStallRecovery() {
-  if (stallRecoveryTimer) return; // a recovery attempt is already queued
-
-  stallRecoveryTimer = setTimeout(() => {
-    stallRecoveryTimer = null;
-    recoverStalledPlayback();
-  }, 4000);
-}
-
-function cancelStallRecovery() {
-  if (!stallRecoveryTimer) return;
-  clearTimeout(stallRecoveryTimer);
-  stallRecoveryTimer = null;
-}
-
-// Reloads the currently loaded track from its exact last position
-// and resumes — used when the stream stalls/errors instead of
-// leaving the player stuck silent. No-ops if playback already
-// recovered (or moved on) by the time the timer fires.
-function recoverStalledPlayback() {
-  if (!state.currentSong || !state.isPlaying) return;
-  if (!audio.paused && audio.readyState > 2) return;
-
-  const resumeAt = audio.currentTime || 0;
-  const src = audio.src;
-  if (!src) return;
-
-  const onReady = () => {
-    audio.removeEventListener("loadedmetadata", onReady);
-    audio.currentTime = resumeAt;
-    audio.play().catch(console.error);
-  };
-
-  audio.addEventListener("loadedmetadata", onReady);
-
-  audio.src = src;
-  audio.load();
-}
-
-function setupPlaybackRecovery() {
-  audio.addEventListener("waiting", scheduleStallRecovery);
-  audio.addEventListener("stalled", scheduleStallRecovery);
-  audio.addEventListener("playing", cancelStallRecovery);
-  audio.addEventListener("canplay", cancelStallRecovery);
-
-  audio.addEventListener("error", () => {
-    console.error("Audio element error:", audio.error);
-    scheduleStallRecovery();
-  });
-
-  // Resync reality after the Mini App comes back to the foreground:
-  // if we still think we should be playing but the element is
-  // actually paused/stuck, kick playback back into gear.
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") return;
-    if (!state.isPlaying || !state.currentSong) return;
-
-    if (audio.paused) {
-      audio.play().catch(console.error);
-    } else if (audio.readyState <= 2) {
-      recoverStalledPlayback();
-    }
-  });
 }
 
 // contextList is the list the song was selected from (e.g. the
@@ -2825,33 +2465,12 @@ function startPlayback(song) {
 
   updatePlayerUI();
 
-  // Records this play server-side (see addRecentlyPlayed() in
-  // worker.js) for any song the user can actually listen to —
-  // including public Discover tracks now, not just their own
-  // uploads — and optimistically bumps the on-screen play count by
-  // one so it doesn't wait for a full list reload to move.
   api("/recently-played", {
     method: "POST",
     body: JSON.stringify({
       song_id: song.id
     })
-  })
-    .then(() => {
-      if (song.play_count !== undefined && song.play_count !== null) {
-        song.play_count = Number(song.play_count) + 1;
-      } else {
-        song.play_count = 1;
-      }
-
-      if (
-        state.currentSong &&
-        Number(state.currentSong.id) === Number(song.id)
-      ) {
-        const statsEl = document.getElementById("playerStats");
-        if (statsEl) statsEl.textContent = formatPlaysLikes(song);
-      }
-    })
-    .catch(console.error);
+  }).catch(console.error);
 }
 
 function togglePlay() {
@@ -2992,11 +2611,6 @@ function updatePlayerUI() {
   document.getElementById("miniArtist").textContent = artist;
   setPlayerIdentityText(title, artist);
 
-  const statsEl = document.getElementById("playerStats");
-  if (statsEl) {
-    statsEl.textContent = formatPlaysLikes(song);
-  }
-
   setCoverArt(
     "miniCover",
     song.cover_url,
@@ -3069,8 +2683,6 @@ function updatePlayButtons() {
   // Visual-only hook (CSS reads this class for the subtle cover
   // animation + mini player state). Does not affect audio/state logic.
   document.body.classList.toggle("is-playing", state.isPlaying);
-
-  updateContinueCardPlayState();
 }
 
 // Visual-only: marks whichever rendered song-item(s) match the
@@ -3106,12 +2718,6 @@ function openFullPlayer() {
   // display:none, so fitLyricsText() couldn't measure it earlier —
   // refit now that it's actually laid out.
   fitLyricsText();
-
-  // Lyrics may have already loaded while the player was closed (the
-  // box had zero size then, so prewarmLyricsFontSizes() no-op'd) —
-  // now that it's actually laid out, warm the rest of the lines in
-  // the background so playback doesn't pay for it later.
-  prewarmLyricsFontSizes(currentLyricsLines);
 }
 
 function closeFullPlayer() {
@@ -4025,35 +3631,6 @@ function buildLyricsList(result) {
 
   currentLyricsLines = result.lines;
   renderLyricsLine(activeLyricsLineIndex);
-
-  // Warm the font-size cache for every remaining line right away, in
-  // the background, instead of leaving each one to be measured for
-  // the first time whenever playback happens to reach it — see
-  // prewarmLyricsFontSizes()'s comment for why that's what was
-  // actually causing the felt lag.
-  prewarmLyricsFontSizes(currentLyricsLines);
-}
-
-// Builds the word-span markup for one lyrics line's already-split
-// word list. Pulled out on its own so both renderLyricsLine() (the
-// line actually on screen) and prewarmLyricsFontSizes() (every other
-// line, measured ahead of time in the background) build the exact
-// same markup — that's what lets the background measurement's cache
-// entry actually get reused later instead of missing on some subtle
-// difference.
-function buildLyricsWordsHtml(words) {
-  return words
-    .map((word, i) => {
-      const clean = normalizeLyricWord(word);
-      const colorHex = LYRICS_COLOR_WORDS[clean];
-      if (colorHex) {
-        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
-      }
-      const vibe = classifyWordVibe(clean);
-      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
-      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
-    })
-    .join(" ");
 }
 
 // Renders the line at `index` as individual word spans — they flow
@@ -4082,106 +3659,29 @@ function renderLyricsLine(index) {
   track.dir = dir;
 
   const words = text.split(/\s+/).filter(Boolean);
-  const wordsHtml = buildLyricsWordsHtml(words);
 
-  // Clear the previous line and force a reflow before writing the
-  // new one. Without this, on some WebKit WebViews the font-size
-  // write below and the innerHTML write just after it can land in
-  // the same paint, and the previous line's glyphs occasionally
-  // survive that paint for a frame — visually looking like two lines
-  // (one of them warped) stacked on top of each other. Splitting the
-  // clear into its own forced layout closes that window.
-  track.innerHTML = "";
-  void track.offsetHeight;
+  const wordsHtml = words
+    .map((word, i) => {
+      const clean = normalizeLyricWord(word);
+      const colorHex = LYRICS_COLOR_WORDS[clean];
+      if (colorHex) {
+        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
+      }
+      const vibe = classifyWordVibe(clean);
+      const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
+      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
+    })
+    .join(" ");
 
   // Work out this line's font size against an offscreen probe BEFORE
   // the animated word spans ever touch the live track — see
   // measureLyricsFontSize()'s comment for why that ordering is the
-  // part that actually matters for smoothness. In the common case
-  // prewarmLyricsFontSizes() has already measured this exact line in
-  // the background, so this is just a cache read, not a fresh layout
-  // pass — see that function's comment for why that's the part that
-  // actually stopped the lag.
+  // part that actually matters for smoothness.
   if (container && container.clientHeight > 0) {
     track.style.fontSize = measureLyricsFontSize(container, dir, wordsHtml) + "px";
   }
 
   track.innerHTML = wordsHtml;
-}
-
-// Precomputes and caches the font size for every lyrics line up
-// front, a few lines per idle slot, instead of only ever measuring a
-// line the first time playback reaches it.
-//
-// Without this, reaching a brand-new (uncached) line inside
-// updateLyricsSync() — which runs on every "timeupdate" tick — does
-// measureLyricsFontSize()'s full 6-step measure/layout pass right
-// there in the playback callback. That's real, synchronous layout
-// thrashing (style write + scrollHeight read, six times over) landing
-// directly in the middle of normal playback handling, and on lyrics
-// with a lot of short/fast-changing lines that's exactly what was
-// showing up as felt lag / a busy phone, especially on weaker
-// devices — not the word-entrance animation itself.
-//
-// Warming the cache here means that by the time playback actually
-// reaches each line, measureLyricsFontSize() is almost always a plain
-// cache hit (same container width + identical markup, via
-// buildLyricsWordsHtml()) — no forced layout, no jank, right in the
-// path that used to pay for it.
-//
-// Safe to call anytime: it no-ops while the lyrics box is hidden
-// (clientWidth/clientHeight 0, e.g. the full player is closed — see
-// openFullPlayer(), which re-triggers this once the box is actually
-// laid out), and a fresh call always supersedes any still-running
-// one via lyricsPrewarmToken, so switching songs mid-warm-up can't
-// leave a stale background loop measuring the wrong lyrics.
-let lyricsPrewarmToken = 0;
-
-function prewarmLyricsFontSizes(lines) {
-  const token = ++lyricsPrewarmToken;
-
-  if (!lines || !lines.length) return;
-
-  const container = document.getElementById("playerLyrics");
-  if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
-
-  const schedule =
-    (typeof requestIdleCallback === "function" && requestIdleCallback) ||
-    (cb => setTimeout(() => cb({ timeRemaining: () => 8 }), 0));
-
-  let i = 0;
-
-  function step() {
-    if (token !== lyricsPrewarmToken) return; // superseded by a newer song's lines
-
-    const liveContainer = document.getElementById("playerLyrics");
-    if (!liveContainer || liveContainer.clientWidth === 0 || liveContainer.clientHeight === 0) {
-      return; // box got hidden again meanwhile — stop, openFullPlayer() will resume this
-    }
-
-    let processed = 0;
-
-    // A handful of lines per slot keeps each individual chunk cheap
-    // (this is still real layout work, just moved off the playback
-    // path and spread out instead of done all at once).
-    while (i < lines.length && processed < 4) {
-      const text = (lines[i].text || "").trim();
-
-      if (text) {
-        const dir = RTL_TEXT_RE.test(text) ? "rtl" : "ltr";
-        const words = text.split(/\s+/).filter(Boolean);
-        const html = buildLyricsWordsHtml(words);
-        measureLyricsFontSize(liveContainer, dir, html);
-      }
-
-      i++;
-      processed++;
-    }
-
-    if (i < lines.length) schedule(step);
-  }
-
-  schedule(step);
 }
 
 // Binary-searches a font-size (between LYRICS_FONT_MIN/MAX) so `html`

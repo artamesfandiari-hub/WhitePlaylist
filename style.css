@@ -47,19 +47,11 @@ svg { display: block; overflow: visible; }
   --surface: #111111;
   --surface-2: #161616;
   --surface-3: #1d1d1d;
-  --surface-glass: rgba(20, 20, 20, .58);
+  --surface-glass: rgba(18, 18, 18, .78);
   --surface-glass-strong: rgba(15, 15, 15, .92);
 
   --border: rgba(255, 255, 255, .07);
   --border-strong: rgba(255, 255, 255, .13);
-
-  /* Liquid-glass surface kit — a translucent fill + a bright top
-     "rim" line (the light-catching edge every iOS 26 glass panel
-     has) so any card can read as glass instead of flat plastic. */
-  --glass-fill: rgba(255, 255, 255, .055);
-  --glass-fill-active: rgba(255, 255, 255, .095);
-  --glass-blur: blur(26px) saturate(180%);
-  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, .18), inset 0 -1px 0 rgba(255, 255, 255, .03);
 
   --text: #f6f6f6;
   --text-secondary: #9a9a9a;
@@ -171,11 +163,10 @@ main { width: 100%; }
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--glass-fill);
+  background: rgba(255, 255, 255, .06);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-rim);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   color: var(--text);
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
@@ -201,11 +192,6 @@ main { width: 100%; }
 }
 
 .search-section input::placeholder { color: var(--text-muted); }
-
-/* DISCOVER's own search box sits inside a .page that already has
-   16px of horizontal padding — drop .search-section's own left/right
-   padding here so it doesn't stack, while keeping its input styling. */
-.discover-search-section { padding: 0 0 14px; }
 
 .search-section input:focus {
   border-color: var(--border-strong);
@@ -399,15 +385,6 @@ main { width: 100%; }
 .song-actions .liked svg { fill: currentColor; stroke: currentColor; }
 .song-menu-btn svg { width: 18px; height: 18px; }
 
-/* DISCOVER — "Add to Library" row button (replaces the personal ⋯
-   menu on public songs). Same 36px icon-button base as every other
-   .song-actions button above; only the "added" success state and
-   in-flight "loading" state are new. */
-.song-action-add svg { width: 18px; height: 18px; }
-.song-actions .song-action-add.added { color: #fff; }
-.song-actions .song-action-add.added svg { fill: currentColor; stroke: currentColor; }
-.song-actions .song-action-add.loading { opacity: .5; pointer-events: none; }
-
 .rank-badge {
   flex: 0 0 22px;
   width: 22px;
@@ -426,16 +403,13 @@ main { width: 100%; }
   align-items: center;
   padding: 13px;
   border-radius: var(--radius-lg);
-  background: var(--glass-fill);
-  border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-rim);
+  background: var(--surface);
+  border: 1px solid var(--border);
   text-align: left;
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-.library-item:active { transform: scale(.985); background: var(--glass-fill-active); }
+.library-item:active { transform: scale(.985); background: var(--surface-2); }
 
 .library-icon {
   width: 48px;
@@ -549,12 +523,12 @@ main { width: 100%; }
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--glass-fill-active);
+  background: rgba(255, 255, 255, .08);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   color: #fff;
-  box-shadow: var(--shadow-sm), var(--glass-rim);
+  box-shadow: var(--shadow-sm);
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
 .add-button:active { transform: scale(.9); background: rgba(255, 255, 255, .14); }
@@ -570,14 +544,13 @@ main { width: 100%; }
 .primary-button { background: #fff; color: #000; }
 .primary-button:active, .secondary-button:active { transform: scale(.97); }
 .secondary-button {
-  background: var(--glass-fill);
+  background: rgba(255, 255, 255, .06);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-rim);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   color: #fff;
 }
-.secondary-button:active { background: var(--glass-fill-active); }
+.secondary-button:active { background: rgba(255, 255, 255, .1); }
 .full-button { width: 100%; margin-top: 12px; }
 
 /* Plain, unclassed buttons inside modal actions (e.g. the confirm
@@ -588,17 +561,16 @@ main { width: 100%; }
   padding: 0 18px;
   border-radius: var(--radius-sm);
   font-weight: 700;
-  background: var(--glass-fill);
+  background: rgba(255, 255, 255, .06);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-rim);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
   color: #fff;
   transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
 }
 .modal-actions button:not(.primary-button):not(.secondary-button):active {
   transform: scale(.97);
-  background: var(--glass-fill-active);
+  background: rgba(255, 255, 255, .1);
 }
 
 /* HOME DASHBOARD */
@@ -651,26 +623,12 @@ main { width: 100%; }
   display: flex;
   align-items: center;
   gap: 14px;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
   padding: 14px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(165deg, var(--glass-fill-active) 0%, var(--glass-fill) 100%);
+  background: linear-gradient(165deg, #171717 0%, #101010 100%);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-sm), var(--glass-rim);
   position: relative;
   overflow: hidden;
-}
-.continue-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,.10), transparent 55%);
-  pointer-events: none;
 }
 .continue-card:active { transform: scale(.985); }
 
@@ -680,60 +638,37 @@ main { width: 100%; }
   background: linear-gradient(150deg, #2a2a2a, #101010);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); overflow: hidden; position: relative;
-  z-index: 1;
 }
 
-/* min-width:0 lets this flex child shrink below its content's
-   natural width; flex:1 with an explicit min-width is what makes
-   the ellipsis rules below actually take effect instead of the
-   title stretching the whole card wider than the screen. */
-.continue-info { min-width: 0; max-width: 100%; flex: 1 1 auto; text-align: left; overflow: hidden; position: relative; z-index: 1; }
+.continue-info { min-width: 0; flex: 1; text-align: left; }
 
 .continue-label {
   color: #999; font-size: 11px; font-weight: 650;
   letter-spacing: .4px; text-transform: uppercase; margin-bottom: 4px;
 }
 
-.continue-title {
-  max-width: 100%;
-  font-size: 15.5px; font-weight: 700;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
-.continue-artist {
-  max-width: 100%;
-  margin-top: 3px; color: #888; font-size: 12.5px;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
+.continue-title { font-size: 15.5px; font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.continue-artist { margin-top: 3px; color: #888; font-size: 12.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 .continue-play {
   flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
   background: #fff; color: #000;
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-sm);
-  position: relative;
-  z-index: 1;
 }
 .continue-play svg { width: 20px; height: 20px; fill: currentColor; stroke: none; margin-left: 2px; }
-/* When playing, app.js swaps in ICONS.pause (two bars, centered) —
-   drop the play triangle's optical-centering offset so the pause
-   icon sits dead-center in the same fixed 46px circle. */
-.continue-play.is-pause svg { margin-left: 0; }
 
 /* SMART MIX */
 .smart-mix-card {
   width: 100%;
-  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 18px 18px 18px 20px;
   border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, var(--glass-fill-active) 0%, var(--glass-fill) 65%, var(--glass-fill) 100%);
+  background: linear-gradient(135deg, #242424 0%, #131313 65%, #0d0d0d 100%);
   border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-rim);
   text-align: left;
   position: relative;
   overflow: hidden;
@@ -859,9 +794,9 @@ main { width: 100%; }
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-md), var(--glass-rim);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   transition: box-shadow var(--dur) var(--ease);
 }
@@ -1090,25 +1025,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   font-size: 14px; line-height: 20px;
 }
 
-/* "12 plays · 3 likes" line — sourced from song.play_count/
-   like_count (see updatePlayerUI() in app.js). Hidden entirely
-   (rather than showing "0 plays") until that data has actually
-   loaded for the current song, so it never flashes a wrong number. */
-.player-stats {
-  width: 100%;
-  flex-shrink: 0;
-  margin-top: 2px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.75;
-}
-
-.player-stats:empty {
-  display: none;
-}
-
 /* LYRICS — only the current synced line is ever shown, laid out as
    normal wrapped text: words flow left-to-right and wrap top-to-
    bottom like an ordinary paragraph instead of the old single
@@ -1127,19 +1043,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   justify-content: center;
   overflow: hidden;
   position: relative;
-  /* Isolates this box's painting from the rest of the player and
-     forces its own compositor layer. Without this, some WebKit
-     WebViews (notably Telegram's in-app browser on iOS) can leave a
-     stale frame of the *previous* line's glyphs on screen for a
-     moment when the font-size and word content both change in the
-     same tick (see renderLyricsLine()/measureLyricsFontSize() in
-     app.js) — the two lines then briefly appear stacked/overlapping,
-     one of them warped, until the next repaint. contain: paint stops
-     that stale content from being able to bleed outside this box's
-     bounds, and translateZ(0) promotes it to its own layer so the
-     swap is a clean layer replace instead of an in-place repaint. */
-  contain: paint;
-  transform: translateZ(0);
 }
 
 .player-lyrics-track {
@@ -1405,14 +1308,11 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 .modal-card {
   width: 100%;
-  box-sizing: border-box;
   padding: 22px;
   border-radius: var(--radius-xl);
-  background: var(--surface-glass-strong);
-  border: 1px solid var(--border-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-lg), var(--glass-rim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
   animation: sheetIn var(--dur-slow) var(--ease);
 }
 
@@ -1518,11 +1418,10 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   display: flex;
   align-items: flex-start;
   justify-content: space-around;
-  background: rgba(10, 10, 10, .68);
+  background: rgba(10, 10, 10, .9);
   border-top: 1px solid var(--border);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
 }
 
 .nav-item {

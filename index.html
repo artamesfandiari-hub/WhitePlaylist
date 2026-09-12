@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260911-8">
+  <link rel="stylesheet" href="style.css?v=20260911-7">
 </head>
 
 <body>
@@ -229,39 +229,6 @@
         <div
           class="song-list"
           id="allSongs"
-        >
-          <div class="loading">Loading...</div>
-        </div>
-      </section>
-
-      <!-- DISCOVER (public music page — a distinct catalog view,
-           separate from the personal Songs/Search above, reached
-           directly from its own bottom-nav tab. Reuses the same
-           song-item rows and the existing audio/player system; the
-           only difference per row is "Add to Library" instead of
-           the personal ⋯ menu, since these songs aren't owned by the
-           viewer. See loadDiscoverSongs()/discoverSongHTML() in
-           app.js.) -->
-      <section
-        class="page"
-        id="discoverPage"
-      >
-        <div class="page-title-row">
-          <h1>Discover</h1>
-        </div>
-
-        <div class="search-section discover-search-section">
-          <input
-            id="discoverSearchInput"
-            type="search"
-            placeholder="Search public tracks..."
-            autocomplete="off"
-          >
-        </div>
-
-        <div
-          class="song-list"
-          id="discoverList"
         >
           <div class="loading">Loading...</div>
         </div>
@@ -683,11 +650,6 @@
           —
         </div>
 
-        <div
-          class="player-stats"
-          id="playerStats"
-        ></div>
-
         <!-- Inline lyrics ticker: always part of the player layout
              (no separate panel/button needed). Shows the current
              line plus a couple of lines before/after it, faded by
@@ -878,19 +840,6 @@
 
       <button
         class="nav-item"
-        data-page="discoverPage"
-      >
-        <span>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
-          </svg>
-        </span>
-        <small>Discover</small>
-      </button>
-
-      <button
-        class="nav-item"
         data-page="songsPage"
       >
         <span>
@@ -967,7 +916,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260911-10"></script>
+  <script src="app.js?v=20260911-8"></script>
 
 </body>
 </html>
