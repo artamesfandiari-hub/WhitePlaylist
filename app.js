@@ -1080,9 +1080,30 @@ function renderDiscoverList(songs) {
 // (favorite/add-to-playlist/delete — all acts on the viewer's own
 // library) for an explicit "Add to Library" button, since a public
 // song isn't owned by the viewer until they choose to copy it.
+// Formats a song's global play/like counts as "12 plays · 3 likes",
+// singular where the count is exactly 1, and skipping a side
+// entirely when its number is missing (older cached data, or an
+// endpoint that doesn't return it) rather than showing a false "0".
+function formatPlaysLikes(song) {
+  const parts = [];
+
+  if (song.play_count !== undefined && song.play_count !== null) {
+    const n = Number(song.play_count) || 0;
+    parts.push(`${n} play${n === 1 ? "" : "s"}`);
+  }
+
+  if (song.like_count !== undefined && song.like_count !== null) {
+    const n = Number(song.like_count) || 0;
+    parts.push(`${n} like${n === 1 ? "" : "s"}`);
+  }
+
+  return parts.join(" · ");
+}
+
 function discoverSongHTML(song) {
   const artist = song.artist || "Unknown Artist";
   const album = song.album || "Unknown Album";
+  const stats = formatPlaysLikes(song);
 
   return `
     <div class="song-item" data-song-id="${song.id}">
@@ -1110,6 +1131,7 @@ function discoverSongHTML(song) {
           ${escapeHTML(artist)}
           •
           ${escapeHTML(album)}
+          ${stats ? `• ${escapeHTML(stats)}` : ""}
         </div>
       </button>
 
@@ -2803,19 +2825,33 @@ function startPlayback(song) {
 
   updatePlayerUI();
 
-  // Public Discover songs aren't owned by the viewer (see
-  // markPublic() / addSongToLibrary() above) and the backend's
-  // Recently Played is scoped to the viewer's own songs, so this
-  // call would just 404 for them — skip it rather than let playing a
-  // public track silently fail an API call every time.
-  if (!song._public) {
-    api("/recently-played", {
-      method: "POST",
-      body: JSON.stringify({
-        song_id: song.id
-      })
-    }).catch(console.error);
-  }
+  // Records this play server-side (see addRecentlyPlayed() in
+  // worker.js) for any song the user can actually listen to —
+  // including public Discover tracks now, not just their own
+  // uploads — and optimistically bumps the on-screen play count by
+  // one so it doesn't wait for a full list reload to move.
+  api("/recently-played", {
+    method: "POST",
+    body: JSON.stringify({
+      song_id: song.id
+    })
+  })
+    .then(() => {
+      if (song.play_count !== undefined && song.play_count !== null) {
+        song.play_count = Number(song.play_count) + 1;
+      } else {
+        song.play_count = 1;
+      }
+
+      if (
+        state.currentSong &&
+        Number(state.currentSong.id) === Number(song.id)
+      ) {
+        const statsEl = document.getElementById("playerStats");
+        if (statsEl) statsEl.textContent = formatPlaysLikes(song);
+      }
+    })
+    .catch(console.error);
 }
 
 function togglePlay() {
@@ -2955,6 +2991,11 @@ function updatePlayerUI() {
   document.getElementById("miniTitle").textContent = title;
   document.getElementById("miniArtist").textContent = artist;
   setPlayerIdentityText(title, artist);
+
+  const statsEl = document.getElementById("playerStats");
+  if (statsEl) {
+    statsEl.textContent = formatPlaysLikes(song);
+  }
 
   setCoverArt(
     "miniCover",

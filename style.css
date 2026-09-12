@@ -1090,6 +1090,25 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   font-size: 14px; line-height: 20px;
 }
 
+/* "12 plays · 3 likes" line — sourced from song.play_count/
+   like_count (see updatePlayerUI() in app.js). Hidden entirely
+   (rather than showing "0 plays") until that data has actually
+   loaded for the current song, so it never flashes a wrong number. */
+.player-stats {
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.player-stats:empty {
+  display: none;
+}
+
 /* LYRICS — only the current synced line is ever shown, laid out as
    normal wrapped text: words flow left-to-right and wrap top-to-
    bottom like an ordinary paragraph instead of the old single
