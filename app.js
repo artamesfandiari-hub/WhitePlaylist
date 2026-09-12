@@ -2831,6 +2831,12 @@ let waveformAudioCtx = null;
 
 let lastWaveformPeaks = null;
 
+// Holds the AbortController for whatever waveform download is
+// currently in flight, so it can be cancelled the instant the real
+// song stalls (see ensureWaveformStallHandling()) or a new song
+// starts loading before the previous waveform fetch finished.
+let waveformAbortController = null;
+
 function waveformStorageKey(songId) {
   return `wp_wave_${songId}`;
 }
@@ -2908,50 +2914,121 @@ function loadWaveform(song) {
     return;
   }
 
+  // Never fetch a full extra copy of the song on a data-saver/slow
+  // connection just to draw a waveform — that download used to run
+  // at the exact same moment the <audio> element was buffering the
+  // real stream, and on a weak connection the two competed for the
+  // same limited bandwidth, which is what actually caused playback
+  // to stutter/cut out right as a song started.
+  const connection =
+    navigator.connection ||
+    navigator.webkitConnection ||
+    navigator.mozConnection;
+
+  if (
+    connection &&
+    (connection.saveData ||
+      /2g/.test(connection.effectiveType || ""))
+  ) {
+    setWaveformState("unavailable");
+    return;
+  }
+
   setWaveformState("loading");
   drawWaveform(null); // clear any previous song's bars immediately
 
-  const audioUrl =
-    `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+  ensureWaveformStallHandling();
 
-  // fetchPriority "low" (where supported) so this never competes
-  // with the <audio> element's own request for bandwidth on the
-  // song that's actually about to play.
-  fetch(audioUrl, { priority: "low" })
-    .then(res => {
-      if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
-      return res.arrayBuffer();
+  let started = false;
+
+  const beginFetch = () => {
+    if (started || token !== waveformRequestToken) return;
+    started = true;
+
+    if (waveformAbortController) {
+      waveformAbortController.abort();
+    }
+    waveformAbortController = new AbortController();
+
+    const audioUrl =
+      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+
+    // fetchPriority "low" (where supported) so this never competes
+    // with the <audio> element's own request for bandwidth on the
+    // song that's actually about to play. It's also aborted outright
+    // the moment the audio element stalls (see
+    // ensureWaveformStallHandling()) so it can never keep starving
+    // playback once a rebuffer has already started.
+    fetch(audioUrl, {
+      priority: "low",
+      signal: waveformAbortController.signal
     })
-    .then(buffer => {
-      if (token !== waveformRequestToken) return null; // superseded
+      .then(res => {
+        if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
+        return res.arrayBuffer();
+      })
+      .then(buffer => {
+        if (token !== waveformRequestToken) return null; // superseded
 
-      if (!waveformAudioCtx) {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) throw new Error("Web Audio API unsupported");
-        waveformAudioCtx = new Ctx();
-      }
+        if (!waveformAudioCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) throw new Error("Web Audio API unsupported");
+          waveformAudioCtx = new Ctx();
+        }
 
-      return waveformAudioCtx.decodeAudioData(buffer);
-    })
-    .then(audioBuffer => {
-      if (!audioBuffer || token !== waveformRequestToken) return;
+        return waveformAudioCtx.decodeAudioData(buffer);
+      })
+      .then(audioBuffer => {
+        if (!audioBuffer || token !== waveformRequestToken) return;
 
-      const peaks = computeWaveformPeaks(audioBuffer, WAVEFORM_BAR_COUNT);
+        const peaks = computeWaveformPeaks(audioBuffer, WAVEFORM_BAR_COUNT);
 
-      waveformCache.set(song.id, peaks);
-      saveWaveformToStorage(song.id, peaks);
+        waveformCache.set(song.id, peaks);
+        saveWaveformToStorage(song.id, peaks);
 
-      if (token === waveformRequestToken) {
-        drawWaveform(peaks);
-        setWaveformState("ready");
-      }
-    })
-    .catch(error => {
-      console.error("Waveform:", error);
-      if (token === waveformRequestToken) {
-        setWaveformState("unavailable");
-      }
-    });
+        if (token === waveformRequestToken) {
+          drawWaveform(peaks);
+          setWaveformState("ready");
+        }
+      })
+      .catch(error => {
+        console.error("Waveform:", error);
+        if (token === waveformRequestToken) {
+          setWaveformState("unavailable");
+        }
+      });
+  };
+
+  // Give the <audio> element's own initial buffering a head start
+  // instead of racing it from byte zero. Once the browser reports it
+  // can play through without immediately stalling, it's safe to
+  // start the second (waveform-only) download. A short timeout is
+  // kept as a fallback so the waveform doesn't just never appear on
+  // a connection that never reaches that ready state.
+  if (audio.readyState >= 3 /* HAVE_FUTURE_DATA */) {
+    beginFetch();
+  } else {
+    audio.addEventListener("canplay", beginFetch, { once: true });
+    setTimeout(beginFetch, 4000);
+  }
+}
+
+// Aborts any in-flight waveform download the instant the actual
+// song stalls/rebuffers, handing all available bandwidth back to
+// playback. Attached once, lazily, the first time a waveform is
+// ever requested.
+let waveformStallHandlingAttached = false;
+
+function ensureWaveformStallHandling() {
+  if (waveformStallHandlingAttached) return;
+  waveformStallHandlingAttached = true;
+
+  audio.addEventListener("waiting", () => {
+    if (waveformAbortController) {
+      waveformAbortController.abort();
+      waveformAbortController = null;
+    }
+  });
 }
 
 // Downsamples channel 0 into `barCount` peak values (0..1) using the
@@ -4058,6 +4135,7 @@ function coverInnerHTML(coverUrl, altText) {
       class="cover-art"
       src="${safeSrc}"
       alt="${safeAlt}"
+      loading="lazy"
       decoding="async"
       onload="this.classList.add('cover-art-loaded')"
       onerror="handleCoverError(this)"
