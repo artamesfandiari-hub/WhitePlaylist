@@ -471,6 +471,59 @@
             </div>
           </button>
 
+          <!-- Discover-only actions (a public track isn't owned by
+               the viewer, so the personal-library items below don't
+               apply). Shown/hidden via openSongActionsMenu() in
+               app.js based on song._public / context.type. -->
+          <button
+            class="library-item hidden"
+            id="songActionDownload"
+          >
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <path d="M5 19h14"></path>
+              </svg>
+            </div>
+            <div class="library-info">
+              <div class="library-name">Download</div>
+            </div>
+          </button>
+
+          <button
+            class="library-item hidden"
+            id="songActionAddToLibrary"
+          >
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </div>
+            <div class="library-info">
+              <div class="library-name" id="songActionAddToLibraryLabel">Add to Library</div>
+            </div>
+          </button>
+
+          <button
+            class="library-item hidden"
+            id="songActionShare"
+          >
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="18" cy="5" r="2.6"></circle>
+                <circle cx="6" cy="12" r="2.6"></circle>
+                <circle cx="18" cy="19" r="2.6"></circle>
+                <line x1="8.3" y1="10.7" x2="15.7" y2="6.3"></line>
+                <line x1="8.3" y1="13.3" x2="15.7" y2="17.7"></line>
+              </svg>
+            </div>
+            <div class="library-info">
+              <div class="library-name">Share</div>
+            </div>
+          </button>
+
           <button
             class="library-item"
             id="songActionPlaylist"
@@ -681,6 +734,18 @@
           id="playerArtist"
         >
           —
+        </div>
+
+        <!-- Discover-only: real play/like counts for the current
+             track. Hidden for personal-library songs — see
+             updatePlayerStats() in app.js. -->
+        <div
+          class="player-stats hidden"
+          id="playerStats"
+        >
+          <span id="playerPlayCount">0 plays</span>
+          <span class="player-stats-dot">•</span>
+          <span id="playerLikeCount">0 likes</span>
         </div>
 
         <!-- Inline lyrics ticker: always part of the player layout
