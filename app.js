@@ -3458,9 +3458,14 @@ let currentLyricsLines = [];
 
 // Bounds for fitLyricsText()'s auto-sizing: short lines render up
 // near the max, long lines shrink toward the min instead of ever
-// overflowing or horizontally scrolling.
+// overflowing or horizontally scrolling. LYRICS_FONT_ABSOLUTE_MIN is
+// a second, lower floor measureLyricsFontSize() falls back to only
+// for the rare very-long line that still wouldn't fit the box even
+// at LYRICS_FONT_MIN — without it, that line would overflow and get
+// clipped against the row above instead of just rendering smaller.
 const LYRICS_FONT_MIN = 17;
 const LYRICS_FONT_MAX = 34;
+const LYRICS_FONT_ABSOLUTE_MIN = 11;
 
 function lyricsStorageKey(songId) {
   return `wp_lrc_${songId}`;
@@ -4072,6 +4077,19 @@ function measureLyricsFontSize(container, dir, html) {
   let lo = LYRICS_FONT_MIN;
   let hi = LYRICS_FONT_MAX;
   let best = LYRICS_FONT_MIN;
+
+  // A handful of lines (long lines with several parenthetical asides,
+  // e.g. rap ad-libs) don't fit even at LYRICS_FONT_MIN — that's what
+  // was overflowing .player-lyrics and clipping into the title/artist
+  // row above it. Detect that case up front and search a lower range
+  // instead, so those lines always shrink to actually fit the box
+  // rather than ever overflowing it.
+  probe.style.fontSize = LYRICS_FONT_MIN + "px";
+  if (probe.scrollHeight > container.clientHeight + 0.5) {
+    lo = LYRICS_FONT_ABSOLUTE_MIN;
+    hi = LYRICS_FONT_MIN;
+    best = LYRICS_FONT_ABSOLUTE_MIN;
+  }
 
   // 6 steps (was 8) — halves neither precision nor smoothness
   // noticeably (worst case ~0.3px off) but cuts two synchronous
