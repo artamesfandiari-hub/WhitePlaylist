@@ -80,10 +80,18 @@ svg { display: block; overflow: visible; }
      color (see updatePlayerDynamicColor() in app.js). Defaults to
      the original lavender-white accent glow above, and is scoped
      to the player/mini-player only so nothing else in the app
-     (focus rings, the playing-row highlight, home ambient
-     background) is affected by a song's color. */
+     (focus rings, the playing-row highlight) is affected by a
+     song's color. The home ambient "ink drop" background uses its
+     own --ambient-glow tokens below, set from the same extraction. */
   --player-glow: var(--accent-glow);
   --player-glow-soft: var(--accent-glow-soft);
+
+  /* Ambient home-background "ink drop" tint — set per-song from the
+     cover's dominant color (see applyPlayerGlow() in app.js), kept
+     separate from --player-glow so it can default to a neutral gray
+     instead of the lavender accent whenever a song has no cover. */
+  --ambient-glow: rgba(150, 150, 150, .55);
+  --ambient-glow-soft: rgba(150, 150, 150, .18);
 
   --radius-sm: 10px;
   --radius-md: 14px;
@@ -1540,23 +1548,24 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 @keyframes homeSkeletonShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
-/* AMBIENT BACKGROUND — two layered low-GPU animated gradients
-   (still just transform-animated radial-gradients, no filters/JS)
-   drifting at different speeds/rotations for a richer, more alive
-   parallax feel, built from the same accent-glow tokens as before. */
+/* AMBIENT BACKGROUND — a drop of color falling into water: a small
+   bright drop falls, "hits the surface" and disappears while a ring
+   of color blooms outward from that point and fades — like ink
+   dropped in water. Tinted per-song via --ambient-glow /
+   --ambient-glow-soft (see app.js), gray by default when the
+   current song has no cover. Still just two animated
+   radial-gradient layers — no filters/JS per frame. */
 #app::before {
   content: "";
   position: fixed;
   inset: -25%;
   z-index: 120;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 16% 18%, rgba(255,255,255,.15), transparent 38%),
-    radial-gradient(circle at 84% 22%, var(--accent-glow), transparent 34%),
-    radial-gradient(circle at 78% 78%, var(--accent-glow-soft), transparent 40%);
-  transform: translate3d(0,0,0) scale(1) rotate(0deg);
-  animation: whitePlaylistAmbient 20s ease-in-out infinite alternate;
-  will-change: transform;
+  background: radial-gradient(circle at 50% 38%, var(--ambient-glow), transparent 6%);
+  opacity: 0;
+  transform: translate3d(0, -32%, 0) scale(.3);
+  animation: ambientDropFall 6s cubic-bezier(.5, 0, .75, 0) infinite;
+  will-change: transform, opacity;
 }
 
 #app::after {
@@ -1565,28 +1574,28 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   inset: -25%;
   z-index: 120;
   pointer-events: none;
-  mix-blend-mode: screen;
   background:
-    radial-gradient(circle at 26% 82%, var(--accent-glow-soft), transparent 42%),
-    radial-gradient(circle at 68% 34%, rgba(255,255,255,.08), transparent 36%);
-  transform: translate3d(0,0,0) scale(1) rotate(0deg);
-  animation: whitePlaylistAmbientDrift 27s ease-in-out infinite alternate;
-  will-change: transform;
+    radial-gradient(circle at 50% 38%, var(--ambient-glow-soft), transparent 30%),
+    radial-gradient(circle at 50% 38%, transparent 34%, var(--ambient-glow-soft) 36%, transparent 40%);
+  opacity: 0;
+  transform: scale(.2);
+  animation: ambientRippleSpread 6s ease-out infinite;
+  will-change: transform, opacity;
 }
 
-@keyframes whitePlaylistAmbient {
-  0%   { transform: translate3d(-3%, -2%, 0) scale(1) rotate(0deg); }
-  25%  { transform: translate3d(2%, -3%, 0) scale(1.05) rotate(1.5deg); }
-  50%  { transform: translate3d(3%, 2%, 0) scale(1.08) rotate(-1deg); }
-  75%  { transform: translate3d(-2%, 3%, 0) scale(1.04) rotate(1deg); }
-  100% { transform: translate3d(-1%, -1%, 0) scale(1.02) rotate(0deg); }
+@keyframes ambientDropFall {
+  0%   { transform: translate3d(0, -32%, 0) scale(.3); opacity: 0; }
+  8%   { opacity: .9; }
+  38%  { transform: translate3d(0, 0, 0) scale(1); opacity: 1; }
+  46%  { transform: translate3d(0, 0, 0) scale(1.3); opacity: 0; }
+  100% { transform: translate3d(0, -32%, 0) scale(.3); opacity: 0; }
 }
 
-@keyframes whitePlaylistAmbientDrift {
-  0%   { transform: translate3d(3%, 2%, 0) scale(1.03) rotate(0deg); }
-  33%  { transform: translate3d(-2%, 3%, 0) scale(1) rotate(-2deg); }
-  66%  { transform: translate3d(-3%, -2%, 0) scale(1.06) rotate(1.5deg); }
-  100% { transform: translate3d(2%, -1%, 0) scale(1.02) rotate(0deg); }
+@keyframes ambientRippleSpread {
+  0%, 36% { transform: scale(.2); opacity: 0; }
+  42%     { transform: scale(.5); opacity: .8; }
+  70%     { transform: scale(1.6); opacity: .35; }
+  100%    { transform: scale(2.6); opacity: 0; }
 }
 
 /* RESPONSIVE */

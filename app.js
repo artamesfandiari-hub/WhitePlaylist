@@ -3293,10 +3293,14 @@ function stopWaveformAnim() {
    DYNAMIC PLAYER COLORS
    ----------------------------------------------------------------
    Extracts a dominant color from the current song's cover and uses
-   it only for the player's ambient glow (--player-glow /
-   --player-glow-soft — see style.css), never for --accent, so
-   text/icon contrast is untouched. Runs once per song/cover change
-   only — never on timeupdate — and is cached per song.
+   it for the player's ambient glow (--player-glow /
+   --player-glow-soft) and the home screen's ambient "ink drop"
+   background (--ambient-glow / --ambient-glow-soft — see
+   style.css), never for --accent, so text/icon contrast is
+   untouched. Runs once per song/cover change only — never on
+   timeupdate — and is cached per song. Falls back to a neutral gray
+   for the ambient drop (and the original lavender-white for the
+   player glow) whenever the current song has no cover.
    ========================================================= */
 
 // song.id -> { glow, glowSoft, wave }
@@ -3414,13 +3418,17 @@ function extractDominantColor(img) {
   return {
     glow: `rgba(${r}, ${g}, ${b}, .55)`,
     glowSoft: `rgba(${r}, ${g}, ${b}, .18)`,
-    wave: `rgba(${r}, ${g}, ${b}, .95)`
+    wave: `rgba(${r}, ${g}, ${b}, .95)`,
+    ambient: `rgba(${r}, ${g}, ${b}, .55)`,
+    ambientSoft: `rgba(${r}, ${g}, ${b}, .18)`
   };
 }
 
 function applyPlayerGlow(colorPair) {
   document.documentElement.style.setProperty("--player-glow", colorPair.glow);
   document.documentElement.style.setProperty("--player-glow-soft", colorPair.glowSoft);
+  document.documentElement.style.setProperty("--ambient-glow", colorPair.ambient);
+  document.documentElement.style.setProperty("--ambient-glow-soft", colorPair.ambientSoft);
   waveformActiveColor = colorPair.wave || "rgba(255,255,255,.92)";
   redrawWaveformProgress();
 }
@@ -3428,6 +3436,8 @@ function applyPlayerGlow(colorPair) {
 function resetPlayerGlow() {
   document.documentElement.style.removeProperty("--player-glow");
   document.documentElement.style.removeProperty("--player-glow-soft");
+  document.documentElement.style.removeProperty("--ambient-glow");
+  document.documentElement.style.removeProperty("--ambient-glow-soft");
   waveformActiveColor = "rgba(255,255,255,.92)";
   redrawWaveformProgress();
 }
