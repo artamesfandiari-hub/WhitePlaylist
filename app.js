@@ -24,7 +24,7 @@ const AUDIO_API =
    behind worker.js instead so the key isn't exposed.
    ========================================================= */
 
-const PEXELS_API_KEY = "REPLACE_ME";
+const PEXELS_API_KEY = "OM1HcI70jjbj5cZeJ1BbDskO4ZMGz41rGx8plrbMP8Bxc5ZzjODfkg50";
 
 
 /* =========================================================
