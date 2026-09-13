@@ -745,19 +745,24 @@ main { width: 100%; }
 .smart-mix-subtitle { margin-top: 4px; color: #999; font-size: 13px; font-weight: 500; }
 
 .smart-mix-play {
-  flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%;
+  flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
+  box-sizing: border-box;
   background: #fff; color: #000;
   display: flex; align-items: center; justify-content: center;
   position: relative;
   box-shadow: var(--shadow-sm);
 }
-.smart-mix-play svg { width: 21px; height: 21px; fill: currentColor; stroke: none; margin-left: 2px; }
+.smart-mix-play svg { width: 20px; height: 20px; fill: currentColor; stroke: none; margin-left: 2px; }
+.smart-mix-play.is-pause svg { margin-left: 0; }
+/* Loading state recolors the same fixed-size circle — never resize it,
+   so it can't read as "growing" when the spinner appears. */
+.smart-mix-play.spinning { background: #d9d9d9; }
 .smart-mix-play.spinning svg { display: none; }
 .smart-mix-play.spinning::after {
   content: "";
-  width: 18px; height: 18px;
+  width: 16px; height: 16px;
   border-radius: 50%;
-  border: 2px solid #ccc;
+  border: 2px solid #999;
   border-top-color: #000;
   animation: smart-mix-spin .7s linear infinite;
 }
