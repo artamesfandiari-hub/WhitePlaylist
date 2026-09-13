@@ -1540,8 +1540,10 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 @keyframes homeSkeletonShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
-/* AMBIENT BACKGROUND — single low-GPU animated gradient, unchanged
-   in cost, refined to use the same accent-glow token everywhere. */
+/* AMBIENT BACKGROUND — two layered low-GPU animated gradients
+   (still just transform-animated radial-gradients, no filters/JS)
+   drifting at different speeds/rotations for a richer, more alive
+   parallax feel, built from the same accent-glow tokens as before. */
 #app::before {
   content: "";
   position: fixed;
@@ -1549,17 +1551,42 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   z-index: 120;
   pointer-events: none;
   background:
-    radial-gradient(circle at 20% 20%, rgba(255,255,255,.12), transparent 40%),
-    radial-gradient(circle at 80% 65%, var(--accent-glow-soft), transparent 38%);
-  transform: translate3d(0,0,0) scale(1);
-  animation: whitePlaylistAmbient 18s ease-in-out infinite alternate;
+    radial-gradient(circle at 16% 18%, rgba(255,255,255,.15), transparent 38%),
+    radial-gradient(circle at 84% 22%, var(--accent-glow), transparent 34%),
+    radial-gradient(circle at 78% 78%, var(--accent-glow-soft), transparent 40%);
+  transform: translate3d(0,0,0) scale(1) rotate(0deg);
+  animation: whitePlaylistAmbient 20s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+#app::after {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: 120;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(circle at 26% 82%, var(--accent-glow-soft), transparent 42%),
+    radial-gradient(circle at 68% 34%, rgba(255,255,255,.08), transparent 36%);
+  transform: translate3d(0,0,0) scale(1) rotate(0deg);
+  animation: whitePlaylistAmbientDrift 27s ease-in-out infinite alternate;
   will-change: transform;
 }
 
 @keyframes whitePlaylistAmbient {
-  0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
-  50%  { transform: translate3d(2%, 1.5%, 0) scale(1.035); }
-  100% { transform: translate3d(-1%, 2%, 0) scale(1.02); }
+  0%   { transform: translate3d(-3%, -2%, 0) scale(1) rotate(0deg); }
+  25%  { transform: translate3d(2%, -3%, 0) scale(1.05) rotate(1.5deg); }
+  50%  { transform: translate3d(3%, 2%, 0) scale(1.08) rotate(-1deg); }
+  75%  { transform: translate3d(-2%, 3%, 0) scale(1.04) rotate(1deg); }
+  100% { transform: translate3d(-1%, -1%, 0) scale(1.02) rotate(0deg); }
+}
+
+@keyframes whitePlaylistAmbientDrift {
+  0%   { transform: translate3d(3%, 2%, 0) scale(1.03) rotate(0deg); }
+  33%  { transform: translate3d(-2%, 3%, 0) scale(1) rotate(-2deg); }
+  66%  { transform: translate3d(-3%, -2%, 0) scale(1.06) rotate(1.5deg); }
+  100% { transform: translate3d(2%, -1%, 0) scale(1.02) rotate(0deg); }
 }
 
 /* RESPONSIVE */
@@ -1577,7 +1604,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
   }
-  #app::before, .mini-player::before,
+  #app::before, #app::after, .mini-player::before,
   .skeleton-block, .cover-art, .page.active,
   body.is-playing .player-cover { animation: none !important; }
 }
