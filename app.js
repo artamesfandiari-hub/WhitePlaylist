@@ -5,6 +5,29 @@ const AUDIO_API =
   "https://white-playlist-api-v2.mahantem2.workers.dev/api/v1/audio";
 
 /* =========================================================
+   FULL-PLAYER BACKGROUND VIDEO (generic stock loops)
+   ---------------------------------------------------------
+   Not a per-song Canvas — just a short, generic looping clip
+   behind the full player, picked from a small set of moods and
+   kept the same every time a given song plays (deterministic
+   pick, not random each time).
+
+   Powered by Pexels' free video-search API. Get a key at
+   https://www.pexels.com/api/ (no cost, no card) and paste it
+   below. Left as "REPLACE_ME", this whole feature silently does
+   nothing — the full player just keeps its plain background,
+   exactly as before.
+
+   Note: this key ships inside app.js, which is public/readable
+   in the browser like the rest of this file. Fine for personal
+   use; if this app ever gets real traffic, move this one fetch
+   behind worker.js instead so the key isn't exposed.
+   ========================================================= */
+
+const PEXELS_API_KEY = "REPLACE_ME";
+
+
+/* =========================================================
    TELEGRAM
    ========================================================= */
 
@@ -2779,6 +2802,7 @@ function updatePlayerUI() {
   updatePlayerDynamicColor(song);
   loadWaveform(song);
   loadLyrics(song);
+  loadPlayerBgVideo(song);
 }
 
 function updatePlayerLike() {
@@ -2847,8 +2871,191 @@ function highlightPlayingRow() {
     .forEach(el => el.classList.add("playing"));
 }
 
+// ---------------------------------------------------------------
+// Full-player background video (see PEXELS_API_KEY above).
+//
+// A small set of tasteful, loop-friendly search terms — no genre
+// data exists on a song to pick something more specific, and a
+// generic abstract loop is exactly what a real Spotify Canvas
+// looks like for most tracks anyway. The pick is a deterministic
+// hash of the song id, so the same song always gets the same
+// background instead of a different one every time it's opened.
+const BG_VIDEO_QUERIES = [
+  "abstract particles",
+  "gradient waves motion",
+  "bokeh lights loop",
+  "ink in water",
+  "colorful smoke",
+  "neon lights motion",
+  "geometric shapes loop",
+  "starfield motion",
+  "light leaks",
+  "liquid color motion"
+];
+
+function pickBgVideoQuery(song) {
+  const key = String(song.id ?? song.title ?? "song");
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  const index = Math.abs(hash) % BG_VIDEO_QUERIES.length;
+  return BG_VIDEO_QUERIES[index];
+}
+
+// query -> video URL, or null for "looked it up, nothing usable
+// came back" (so a failed/empty search is never retried on every
+// single replay of the same song). Lives for the tab's lifetime.
+const bgVideoCache = new Map();
+
+// Bumped on every loadPlayerBgVideo() call so a slow response for a
+// song the person has already skipped past can never land on top of
+// whatever the current song's video already is.
+let bgVideoRequestId = 0;
+
+function getPlayerBgVideoEl() {
+  return document.getElementById("playerBgVideo");
+}
+
+function hidePlayerBgVideo() {
+  const el = getPlayerBgVideoEl();
+  if (!el) return;
+  el.classList.remove("player-bg-video-visible");
+  try { el.pause(); } catch (_) {}
+}
+
+// Pauses (doesn't unload) the current clip — called when the full
+// player closes, so a background video never keeps decoding frames
+// and burning battery/data behind a hidden screen. Left ready to
+// resume instantly if the same song's player is reopened.
+function pausePlayerBgVideo() {
+  const el = getPlayerBgVideoEl();
+  if (!el) return;
+  try { el.pause(); } catch (_) {}
+}
+
+async function fetchBgVideoUrl(query) {
+  if (bgVideoCache.has(query)) {
+    return bgVideoCache.get(query);
+  }
+
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 12000);
+
+  let url = null;
+
+  try {
+    const res = await fetch(
+      `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=1&orientation=portrait&size=small`,
+      {
+        headers: { Authorization: PEXELS_API_KEY },
+        signal: timeoutController.signal
+      }
+    );
+
+    if (res.ok) {
+      const data = await res.json();
+      const files = data?.videos?.[0]?.video_files || [];
+
+      // Prefer the smallest mp4 that's still at least 480px wide —
+      // plenty for a blurred/dimmed background, and far lighter on
+      // mobile data than the source resolution.
+      const mp4Files =
+        files.filter(f => f.file_type === "video/mp4" && f.width);
+
+      const best =
+        mp4Files
+          .filter(f => f.width >= 480)
+          .sort((a, b) => a.width - b.width)[0] ||
+        mp4Files.sort((a, b) => b.width - a.width)[0];
+
+      url = best ? best.link : null;
+    }
+  } catch (_) {
+    // Network error, timeout, bad response — treated the same as
+    // "no video available" below.
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  bgVideoCache.set(query, url);
+  return url;
+}
+
+async function loadPlayerBgVideo(song) {
+  const el = getPlayerBgVideoEl();
+  if (!el || !song) return;
+
+  // Not configured — leave the plain background exactly as it's
+  // always been. This is the default, out-of-the-box state.
+  if (!PEXELS_API_KEY || PEXELS_API_KEY === "REPLACE_ME") return;
+
+  // No point spending data on a video behind a screen that isn't
+  // visible yet — updatePlayerUI() also calls this, and it can fire
+  // while the full player is still closed.
+  if (playerOverlay.classList.contains("hidden")) return;
+
+  // Respect the same "no extra motion" preference the lyrics word
+  // animation already honors — leave the plain background alone.
+  if (
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    return;
+  }
+
+  const myRequestId = ++bgVideoRequestId;
+  const query = pickBgVideoQuery(song);
+
+  const url = await fetchBgVideoUrl(query);
+
+  // Stale by the time it resolved (song changed again, or the
+  // player closed) — never touch the DOM with an old answer.
+  if (myRequestId !== bgVideoRequestId) return;
+  if (playerOverlay.classList.contains("hidden")) return;
+
+  if (!url) {
+    hidePlayerBgVideo();
+    return;
+  }
+
+  // Same clip already loaded (e.g. reopening the player on the same
+  // song) — just resume it instead of restarting/re-buffering.
+  if (el.dataset.bgVideoUrl === url) {
+    el.classList.add("player-bg-video-visible");
+    el.play().catch(() => {});
+    return;
+  }
+
+  el.dataset.bgVideoUrl = url;
+  el.classList.remove("player-bg-video-visible");
+  el.src = url;
+
+  const reveal = () => {
+    if (myRequestId !== bgVideoRequestId) return;
+    el.classList.add("player-bg-video-visible");
+  };
+
+  // A stale/expired link from Pexels shouldn't surface as anything
+  // worse than "no video for this song" — stays hidden, and isn't
+  // left marked as the loaded clip so a later retry isn't blocked.
+  const onError = () => {
+    delete el.dataset.bgVideoUrl;
+    hidePlayerBgVideo();
+  };
+
+  el.addEventListener("loadeddata", reveal, { once: true });
+  el.addEventListener("error", onError, { once: true });
+  el.play().catch(() => {});
+}
+
 function openFullPlayer() {
   playerOverlay.classList.remove("hidden");
+
+  if (state.currentSong) {
+    loadPlayerBgVideo(state.currentSong);
+  }
+
 
   // The waveform canvas has zero size while the overlay is
   // display:none, so any draw that happened while it was closed was
@@ -2871,6 +3078,7 @@ function openFullPlayer() {
 
 function closeFullPlayer() {
   playerOverlay.classList.add("hidden");
+  pausePlayerBgVideo();
 }
 
 // Visual-only: paints the portion of the track already played.

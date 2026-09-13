@@ -955,6 +955,32 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   transition: background var(--dur-slow) var(--ease);
 }
 
+/* Optional per-song background loop (see PEXELS_API_KEY in app.js).
+   Sits below the ambient glow above (z-index -1) so the existing
+   glow still washes over it exactly like it does over the plain
+   gradient background — nothing else about .player changes.
+   Dimmed via filter (not a separate overlay element) so there's
+   nothing extra in the stacking order to get wrong. Stays fully
+   transparent, and therefore invisible, until app.js has an actual
+   clip loaded and ready to show. */
+.player-bg-video {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  filter: brightness(.55) saturate(1.15);
+  transition: opacity 600ms var(--ease);
+  pointer-events: none;
+}
+.player-bg-video.player-bg-video-visible { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .player-bg-video { display: none; }
+}
+
 .player-top-row {
   width: auto;
   display: flex;
