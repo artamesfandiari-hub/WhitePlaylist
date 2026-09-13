@@ -2756,14 +2756,14 @@ function updatePlayerUI() {
     "miniCover",
     song.cover_url,
     title,
-    "𝄞"
+    ICONS.music
   );
 
   setCoverArt(
     "playerCover",
     song.cover_url,
     title,
-    `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`
+    ICONS.music
   );
 
   miniPlayer.classList.remove("hidden");
@@ -4243,7 +4243,7 @@ function escapeHTML(value) {
 // unchanged, when no cover_url is available.
 function coverInnerHTML(coverUrl, altText) {
   if (!coverUrl) {
-    return `<span class="music-unicode" aria-hidden="true">𝄞</span>`;
+    return ICONS.music;
   }
 
   const safeAlt = escapeHTML(altText || "Album cover");
@@ -4266,11 +4266,11 @@ function coverInnerHTML(coverUrl, altText) {
 // etc.), fall back to the existing placeholder glyph instead of
 // showing a broken image.
 function handleCoverError(img) {
-  const span = document.createElement("span");
-  span.className = "music-unicode";
-  span.setAttribute("aria-hidden", "true");
-  span.textContent = "𝄞";
-  img.replaceWith(span);
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = ICONS.music.trim();
+  const svg = wrapper.firstElementChild;
+  if (svg) svg.setAttribute("aria-hidden", "true");
+  img.replaceWith(svg || wrapper);
 }
 
 // Tracks the latest setCoverArt() request per container, so a
@@ -4377,10 +4377,7 @@ function handleCoverErrorForContainer(containerId, token, img) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  container.innerHTML =
-    containerId === "miniCover"
-      ? "𝄞"
-      : `<div class="player-cover-symbol" aria-hidden="true">𝄞</div>`;
+  container.innerHTML = ICONS.music;
 }
 
 

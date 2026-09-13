@@ -819,11 +819,6 @@ main { width: 100%; }
 }
 .cover-art.cover-art-loaded { opacity: 1; transform: scale(1); }
 
-.music-unicode {
-  color: #fff; font-size: 30px; line-height: 1;
-  font-family: "Times New Roman", "Noto Music", serif; font-weight: 400;
-  user-select: none;
-}
 .music-nav-unicode {
   color: inherit; font-size: 23px; line-height: 22px;
   font-family: "Times New Roman", "Noto Music", serif; font-weight: 400;
@@ -1041,13 +1036,6 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 .player-cover svg { width: 62px; height: 62px; }
 
-.player-cover-symbol {
-  color: #fff; font-size: 120px; line-height: 1;
-  font-family: "Times New Roman", "Noto Music", serif; font-weight: 400;
-  transform: translateY(-4px);
-  user-select: none;
-}
-
 .player-title-row {
   width: 100%;
   flex-shrink: 0;
@@ -1094,6 +1082,11 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   justify-content: center;
   overflow: hidden;
   position: relative;
+  /* Layout/paint inside this box (word spans entering/animating on
+     every line change) never affects anything outside it, so the
+     browser doesn't need to re-check the rest of the page each time
+     — cuts real work off the animation path on weaker phones. */
+  contain: content;
 }
 
 .player-lyrics-track {
@@ -1156,18 +1149,26 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-lyrics-word {
   display: inline-block;
   opacity: 0;
-  transform: translateY(6px);
+  transform: translate3d(0, 6px, 0);
   animation: lyricWordIn 380ms var(--ease) forwards;
   animation-delay: calc(var(--word-i, 0) * 24ms);
+  /* Promote each word to its own compositor layer up front instead
+     of letting the browser decide mid-animation — with a whole line
+     of these starting within milliseconds of each other, that
+     up-front promotion is what keeps the stagger smooth on weaker
+     phones instead of jank on the first frame. Each line's spans are
+     thrown away and rebuilt on the next line change anyway (see
+     renderLyricsLine()), so there's no lingering layer to clean up. */
+  will-change: transform, opacity;
 }
 
 @keyframes lyricWordIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .player-lyrics-word { animation: none; opacity: 1; transform: none; }
+  .player-lyrics-word { animation: none; opacity: 1; transform: none; will-change: auto; }
 }
 
 .player-lyrics-status {
@@ -1320,13 +1321,26 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .icon-button svg, .song-cover svg, .song-actions svg, .library-icon svg,
 .library-arrow svg, .back-button svg, .add-button svg, .mini-cover svg,
 .mini-like svg, .mini-play svg, .player-close svg, .nav-item svg,
-.player-controls button:not(.main-play) svg {
+.player-controls button:not(.main-play) svg,
+.hcard-cover svg, .continue-cover svg, .player-cover svg,
+.playlist-card-cover svg, .artist-card-cover svg,
+.artist-detail-cover svg, .playlist-detail-cover > svg {
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Placeholder note/list/person glyphs used when a song, album,
+   playlist, or artist has no cover art. Without an explicit
+   width/height these inline SVGs fell back to the browser's default
+   replaced-element box (unrelated to the 24x24 viewBox), which is
+   what made them render oversized/stretched/off-center inside their
+   round or square containers. */
+.hcard-cover svg { width: 34px; height: 34px; }
+.continue-cover svg { width: 26px; height: 26px; }
+.artist-card-cover svg { width: 32px; height: 32px; }
 .player-controls .main-play svg { fill: currentColor; stroke: none; }
 .song-actions .liked svg { fill: currentColor; stroke: currentColor; }
 
