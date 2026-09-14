@@ -2511,7 +2511,14 @@ function setupPlayer() {
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
 
-  setupMediaSessionHandlers();
+  // Guarded on its own: must never be able to abort the rest of
+  // setupPlayer() (the error/waiting/resize listeners right below
+  // are load-bearing for playback reliability).
+  try {
+    setupMediaSessionHandlers();
+  } catch (err) {
+    console.error("MediaSession setup:", err);
+  }
 
   // Mobile connections (especially inside Telegram's in-app browser)
   // routinely drop or stall mid-stream. Without this, the <audio>
@@ -2649,38 +2656,90 @@ function togglePlay() {
 // into the browser's mediaSession API and never changes playback
 // logic itself.
 
+// Bumped on every call so an in-flight artwork fetch from a song the
+// user already skipped away from can recognize it's stale and back
+// off instead of overwriting the metadata of whatever's playing now.
+let mediaSessionArtworkToken = 0;
+
 // Sets title/artist/artwork so the lock screen shows the real song
-// instead of a blank/generic entry. Cheap to call on every
-// updatePlayerUI() — the browser just replaces the metadata object.
+// instead of a blank/generic entry. Called on every updatePlayerUI().
+//
+// Title/artist are applied immediately (synchronously). Artwork is
+// applied separately, async, once it's ready — see the note below on
+// why it isn't just handed a URL like title/artist are.
 function updateMediaSessionMetadata(song) {
   if (!("mediaSession" in navigator)) return;
 
   const title = song.title || "Unknown";
   const artist = song.artist || "Unknown Artist";
-  const artwork = [];
-
-  if (song.cover_url) {
-    const resolvedCover = resolveCoverUrl(song.cover_url);
-
-    // Multiple declared sizes pointing at the same image are fine —
-    // the OS just picks whichever it prefers to render; we don't
-    // have separate resized assets to offer.
-    ["96x96", "192x192", "256x256", "384x384", "512x512"].forEach(
-      sizes => {
-        artwork.push({ src: resolvedCover, sizes, type: "image/jpeg" });
-      }
-    );
-  }
 
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title,
       artist,
       album: "White Playlist",
-      artwork
+      artwork: []
     });
   } catch (err) {
     console.error("MediaSession metadata:", err);
+    return;
+  }
+
+  if (!song.cover_url) return;
+
+  const token = ++mediaSessionArtworkToken;
+
+  loadMediaSessionArtwork(song, token);
+}
+
+// Fetches the cover art as a data URL and re-applies it to the
+// mediaSession metadata once ready.
+//
+// Why not just hand MediaMetadata the cover_url directly (like the
+// <img> tags elsewhere in the app do)? The lock screen/Control
+// Center artwork isn't rendered by this page — iOS fetches that URL
+// itself, from outside the page's JS/network context. That fetch can
+// silently fail (auth headers, Cloudflare rules, WKWebView quirks)
+// even when the exact same URL loads fine as an <img> here. Fetching
+// it ourselves — since we already know that succeeds — and inlining
+// the actual bytes as a data URL sidesteps that second, invisible
+// fetch entirely.
+async function loadMediaSessionArtwork(song, token) {
+  const resolvedCover = resolveCoverUrl(song.cover_url);
+
+  try {
+    const response = await fetch(resolvedCover);
+    if (!response.ok) return;
+
+    const blob = await response.blob();
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    // Superseded by a newer song (or the same song reloading) while
+    // this fetch was in flight — the newer call owns the metadata
+    // now, don't stomp on it with artwork for the old song.
+    if (token !== mediaSessionArtworkToken) return;
+    if (!state.currentSong || state.currentSong.id !== song.id) return;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: song.title || "Unknown",
+      artist: song.artist || "Unknown Artist",
+      album: "White Playlist",
+      artwork: [
+        {
+          src: dataUrl,
+          sizes: "512x512",
+          type: blob.type || "image/jpeg"
+        }
+      ]
+    });
+  } catch (err) {
+    console.error("MediaSession artwork:", err);
   }
 }
 
@@ -2714,37 +2773,42 @@ function updateMediaSessionPositionState() {
 // same functions the in-app controls already use. Called once from
 // setupPlayer(); the handlers stay valid across song changes since
 // they read state.currentSong/audio at call time, not at setup time.
+//
+// Each handler is registered independently (its own try/catch): some
+// WebViews (notably iOS's) throw on action names they don't support,
+// and a single unsupported action must never prevent the others from
+// registering or, worse, abort the rest of setupPlayer() if this
+// function were called without any guard at all.
 function setupMediaSessionHandlers() {
   if (!("mediaSession" in navigator)) return;
 
-  navigator.mediaSession.setActionHandler("play", () => {
+  const safelySetHandler = (action, handler) => {
+    try {
+      navigator.mediaSession.setActionHandler(action, handler);
+    } catch (err) {
+      console.warn(`MediaSession: "${action}" not supported`, err);
+    }
+  };
+
+  safelySetHandler("play", () => {
     audio.play().catch(console.error);
   });
 
-  navigator.mediaSession.setActionHandler("pause", () => {
+  safelySetHandler("pause", () => {
     audio.pause();
   });
 
-  navigator.mediaSession.setActionHandler("previoustrack", previousSong);
-  navigator.mediaSession.setActionHandler("nexttrack", nextSong);
+  safelySetHandler("previoustrack", previousSong);
+  safelySetHandler("nexttrack", nextSong);
 
-  navigator.mediaSession.setActionHandler("stop", () => {
-    audio.pause();
-    audio.currentTime = 0;
+  safelySetHandler("seekto", details => {
+    if (details.fastSeek && "fastSeek" in audio) {
+      audio.fastSeek(details.seekTime);
+    } else {
+      audio.currentTime = details.seekTime;
+    }
+    updateMediaSessionPositionState();
   });
-
-  try {
-    navigator.mediaSession.setActionHandler("seekto", details => {
-      if (details.fastSeek && "fastSeek" in audio) {
-        audio.fastSeek(details.seekTime);
-      } else {
-        audio.currentTime = details.seekTime;
-      }
-      updateMediaSessionPositionState();
-    });
-  } catch (err) {
-    // Some older WebViews don't support "seekto" — safe to skip.
-  }
 }
 
 // Single control cycling through three playback modes:
