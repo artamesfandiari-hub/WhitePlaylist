@@ -4599,11 +4599,11 @@ function buildLyricsWordsHtml(words) {
       const clean = normalizeLyricWord(word);
       const colorHex = LYRICS_COLOR_WORDS[clean];
       if (colorHex) {
-        return `<span class="player-lyrics-word" style="--word-i:${i};color:${colorHex}">${escapeHTML(word)}</span>`;
+        return `<span class="player-lyrics-word" style="color:${colorHex}">${escapeHTML(word)}</span>`;
       }
       const vibe = classifyWordVibe(clean);
       const vibeClass = vibe ? ` player-lyrics-word--${vibe}` : "";
-      return `<span class="player-lyrics-word${vibeClass}" style="--word-i:${i}">${escapeHTML(word)}</span>`;
+      return `<span class="player-lyrics-word${vibeClass}">${escapeHTML(word)}</span>`;
     })
     .join(" ");
 }
@@ -4649,6 +4649,16 @@ function renderLyricsLine(index) {
   }
 
   track.innerHTML = wordsHtml;
+
+  // Restart the whole-line entrance animation: remove the class,
+  // force a reflow (without this the browser just sees the class is
+  // already there and never replays the animation), then re-add it.
+  // One class toggle per line change — much cheaper than the old
+  // per-word stagger, which set up to a few dozen independent
+  // animations per line.
+  track.classList.remove("player-lyrics-line-in");
+  void track.offsetWidth;
+  track.classList.add("player-lyrics-line-in");
 }
 
 // Precomputes and caches the font size for every lyrics line up
@@ -4801,12 +4811,6 @@ function measureLyricsFontSize(container, dir, html) {
   probe.style.width = width + "px";
   probe.style.maxHeight = "none";
   probe.innerHTML = html;
-
-  // No need for the entrance animation to even exist on a probe
-  // that's never seen.
-  probe.querySelectorAll(".player-lyrics-word").forEach(word => {
-    word.style.animation = "none";
-  });
 
   container.appendChild(probe);
 

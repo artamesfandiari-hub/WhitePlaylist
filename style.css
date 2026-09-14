@@ -18,6 +18,16 @@ html, body {
   padding: 0;
   width: 100%;
   min-height: 100%;
+  /* Without this, iOS's system "Larger Text" accessibility setting
+     makes WebKit silently inflate rendered text beyond the px sizes
+     this stylesheet (and app.js's lyrics auto-sizing) actually set —
+     the DOM/layout never finds out, so anything measured to fit a
+     box (most importantly .player-lyrics-track's JS-computed font
+     size) ends up bigger on screen than what was measured and
+     overflows/clips. Pinning this to 100% keeps every px value in
+     this file exact regardless of the device's text-size setting. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body { overflow-x: hidden; }
@@ -1290,33 +1300,34 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #3ddc84;
 }
 
-/* Each word is its own element (rather than one solid line) so the
-   text reads as being written word by word — words simply sit next
-   to each other and wrap normally, they never stretch, stack, or
-   overlap. A quick, subtle stagger on entry is the only motion. */
+/* Each word is still its own element (so per-word color tinting keeps
+   working) but words no longer animate individually — they just sit
+   at their final position/opacity the instant the line's markup is
+   inserted. The whole line animates in together instead (one
+   animation on .player-lyrics-track below), which is one compositor
+   layer and one timer per line change instead of one per word — far
+   lighter to render, especially on longer lines, while still reading
+   as a clean, deliberate entrance rather than a hard cut. */
 .player-lyrics-word {
   display: inline-block;
-  opacity: 0;
-  transform: translate3d(0, 6px, 0);
-  animation: lyricWordIn 380ms var(--ease) forwards;
-  animation-delay: calc(var(--word-i, 0) * 24ms);
-  /* Promote each word to its own compositor layer up front instead
-     of letting the browser decide mid-animation — with a whole line
-     of these starting within milliseconds of each other, that
-     up-front promotion is what keeps the stagger smooth on weaker
-     phones instead of jank on the first frame. Each line's spans are
-     thrown away and rebuilt on the next line change anyway (see
-     renderLyricsLine()), so there's no lingering layer to clean up. */
-  will-change: transform, opacity;
 }
 
-@keyframes lyricWordIn {
-  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+/* Whole-line entrance: a quick fade + slight rise applied to the
+   track as a single unit. app.js toggles this class off and back on
+   every time a new line's markup is set (forcing a reflow in between
+   so the animation restarts), so each line gets the same light
+   entrance without ever touching individual words. */
+.player-lyrics-track.player-lyrics-line-in {
+  animation: lyricLineIn 260ms var(--ease);
+}
+
+@keyframes lyricLineIn {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .player-lyrics-word { animation: none; opacity: 1; transform: none; will-change: auto; }
+  .player-lyrics-track.player-lyrics-line-in { animation: none; }
 }
 
 .player-lyrics-status {
