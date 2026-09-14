@@ -250,15 +250,14 @@ const ICONS = {
     </svg>
   `,
 
-  chevronUp: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <polyline points="6 15 12 9 18 15"></polyline>
-    </svg>
-  `,
-
-  chevronDown: `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <polyline points="6 9 12 15 18 9"></polyline>
+  dragHandle: `
+    <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none;">
+      <circle cx="9" cy="6" r="1.5"></circle>
+      <circle cx="15" cy="6" r="1.5"></circle>
+      <circle cx="9" cy="12" r="1.5"></circle>
+      <circle cx="15" cy="12" r="1.5"></circle>
+      <circle cx="9" cy="18" r="1.5"></circle>
+      <circle cx="15" cy="18" r="1.5"></circle>
     </svg>
   `
 };
@@ -334,6 +333,7 @@ async function init() {
   setupPlayer();
   setupModals();
   setupSongsSelectMode();
+  setupQueueDragging();
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
@@ -3154,7 +3154,14 @@ function previousSong() {
    UP NEXT (queue modal)
    Reuses the existing state.queue/state.queueIndex that already
    drives Next/Previous/Shuffle — this just gives it a screen, plus
-   simple up/down reordering and remove-from-queue.
+   drag-to-reorder and remove-from-queue.
+
+   Reordering moves the existing DOM node (insertBefore/appendChild)
+   instead of rebuilding innerHTML, and only touches data-index/
+   disabled/playing on the rows — it never regenerates a row's cover
+   markup, so cover art never re-fetches/flickers when the order
+   changes. Only removeFromQueue() and a fresh openQueueModal() call
+   renderQueueModal() (a full rebuild); dragging never does.
    ========================================================= */
 
 function openQueueModal() {
@@ -3203,18 +3210,10 @@ function renderQueueModal() {
 
         <div class="queue-item-actions">
           <button
-            data-queue-action="up"
+            class="queue-drag-handle"
             data-index="${index}"
-            aria-label="Move up"
-            ${index === 0 ? "disabled" : ""}
-          >${ICONS.chevronUp}</button>
-
-          <button
-            data-queue-action="down"
-            data-index="${index}"
-            aria-label="Move down"
-            ${index === state.queue.length - 1 ? "disabled" : ""}
-          >${ICONS.chevronDown}</button>
+            aria-label="Drag to reorder"
+          >${ICONS.dragHandle}</button>
 
           <button
             data-queue-action="remove"
@@ -3237,8 +3236,6 @@ function renderQueueModal() {
       const index = Number(button.dataset.index);
 
       if (action === "play") jumpToQueueIndex(index);
-      if (action === "up") moveQueueItem(index, -1);
-      if (action === "down") moveQueueItem(index, 1);
       if (action === "remove") removeFromQueue(index);
     });
   });
@@ -3253,24 +3250,6 @@ function jumpToQueueIndex(index) {
   closeQueueModal();
 }
 
-function moveQueueItem(index, direction) {
-  const target = index + direction;
-  if (target < 0 || target >= state.queue.length) return;
-
-  const queue = state.queue;
-  [queue[index], queue[target]] = [queue[target], queue[index]];
-
-  // Keep queueIndex pointing at whichever song is actually playing,
-  // since it just swapped positions along with everything else.
-  if (state.queueIndex === index) {
-    state.queueIndex = target;
-  } else if (state.queueIndex === target) {
-    state.queueIndex = index;
-  }
-
-  renderQueueModal();
-}
-
 function removeFromQueue(index) {
   if (index === state.queueIndex) return;
 
@@ -3281,6 +3260,145 @@ function removeFromQueue(index) {
   }
 
   renderQueueModal();
+}
+
+/* ---------------------------------------------------------
+   Drag-to-reorder — pointer events so it works the same for
+   touch (Telegram in-app browser) and mouse. Bound once on the
+   container via delegation (setupQueueDragging(), called from
+   init()) so it keeps working across every renderQueueModal()
+   rebuild without needing to be re-attached.
+   --------------------------------------------------------- */
+
+let queueDrag = null;
+
+function setupQueueDragging() {
+  const container = document.getElementById("queueList");
+  if (!container) return;
+
+  container.addEventListener("pointerdown", event => {
+    const handle = event.target.closest(".queue-drag-handle");
+    if (!handle) return;
+
+    const item = handle.closest(".song-item");
+    if (!item) return;
+
+    const items = [...container.querySelectorAll(".song-item")];
+    const startIndex = items.indexOf(item);
+    if (startIndex === -1) return;
+
+    event.preventDefault();
+
+    queueDrag = {
+      item,
+      items,
+      startIndex,
+      currentIndex: startIndex,
+      itemHeight: item.offsetHeight,
+      startY: event.clientY,
+      pointerId: event.pointerId
+    };
+
+    item.classList.add("dragging");
+    item.setPointerCapture(event.pointerId);
+    item.addEventListener("pointermove", onQueueDragMove);
+    item.addEventListener("pointerup", endQueueDrag);
+    item.addEventListener("pointercancel", endQueueDrag);
+  });
+}
+
+function onQueueDragMove(event) {
+  if (!queueDrag || event.pointerId !== queueDrag.pointerId) return;
+
+  const { item, items, startIndex, itemHeight, startY } = queueDrag;
+  const deltaY = event.clientY - startY;
+
+  item.style.transform = `translateY(${deltaY}px)`;
+
+  const rawTarget = startIndex + Math.round(deltaY / itemHeight);
+  const targetIndex = Math.max(0, Math.min(items.length - 1, rawTarget));
+
+  if (targetIndex === queueDrag.currentIndex) return;
+
+  // Slide every row between the drag's start and its current target
+  // out of the way by one slot — the dragged row itself is skipped
+  // (it already follows the pointer via the transform set above).
+  items.forEach((row, idx) => {
+    if (row === item) return;
+
+    let shift = 0;
+    if (targetIndex > startIndex && idx > startIndex && idx <= targetIndex) {
+      shift = -itemHeight;
+    } else if (targetIndex < startIndex && idx >= targetIndex && idx < startIndex) {
+      shift = itemHeight;
+    }
+
+    row.style.transform = shift ? `translateY(${shift}px)` : "";
+  });
+
+  queueDrag.currentIndex = targetIndex;
+}
+
+function endQueueDrag(event) {
+  if (!queueDrag || event.pointerId !== queueDrag.pointerId) return;
+
+  const { item, items, startIndex, currentIndex } = queueDrag;
+
+  item.removeEventListener("pointermove", onQueueDragMove);
+  item.removeEventListener("pointerup", endQueueDrag);
+  item.removeEventListener("pointercancel", endQueueDrag);
+
+  item.classList.remove("dragging");
+  item.style.transform = "";
+  items.forEach(row => { if (row !== item) row.style.transform = ""; });
+
+  queueDrag = null;
+
+  if (currentIndex !== startIndex) {
+    reorderQueue(startIndex, currentIndex);
+  }
+}
+
+// Updates state.queue/state.queueIndex, then physically moves the
+// already-existing row (insertBefore/appendChild) to match — never
+// touches any row's inner markup, so no cover art reloads.
+function reorderQueue(fromIndex, toIndex) {
+  const queue = state.queue;
+  const [moved] = queue.splice(fromIndex, 1);
+  queue.splice(toIndex, 0, moved);
+
+  if (state.queueIndex === fromIndex) {
+    state.queueIndex = toIndex;
+  } else if (fromIndex < state.queueIndex && toIndex >= state.queueIndex) {
+    state.queueIndex -= 1;
+  } else if (fromIndex > state.queueIndex && toIndex <= state.queueIndex) {
+    state.queueIndex += 1;
+  }
+
+  const container = document.getElementById("queueList");
+  if (!container) return;
+
+  const rows = [...container.querySelectorAll(".song-item")];
+  const movedEl = rows[fromIndex];
+  if (!movedEl) return;
+
+  if (toIndex >= rows.length - 1) {
+    container.appendChild(movedEl);
+  } else {
+    const referenceEl = rows[toIndex + (toIndex > fromIndex ? 1 : 0)];
+    container.insertBefore(movedEl, referenceEl);
+  }
+
+  [...container.querySelectorAll(".song-item")].forEach((row, index) => {
+    row.querySelectorAll("[data-queue-action], .queue-drag-handle").forEach(el => {
+      el.dataset.index = String(index);
+    });
+
+    const removeBtn = row.querySelector('[data-queue-action="remove"]');
+    const isCurrent = index === state.queueIndex;
+    if (removeBtn) removeBtn.disabled = isCurrent;
+    row.classList.toggle("playing", isCurrent);
+  });
 }
 
 // Updates the full-player title/artist immediately whenever the song

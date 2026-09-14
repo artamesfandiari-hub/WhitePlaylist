@@ -498,6 +498,18 @@ main { width: 100%; }
 /* UP NEXT / QUEUE MODAL */
 .queue-list { max-height: 56vh; overflow-y: auto; margin: -2px; padding: 2px; }
 
+/* Rows animate into place when a drag displaces them; the dragged
+   row itself (.dragging) gets its transform set directly per-frame
+   in app.js, so its own transition is turned off to avoid fighting
+   that. */
+.queue-list .song-item { transition: transform 150ms var(--ease), background var(--dur) var(--ease); }
+.queue-list .song-item.dragging {
+  transition: background var(--dur) var(--ease);
+  z-index: 5;
+  background: var(--surface-3);
+  box-shadow: var(--shadow-md);
+}
+
 .queue-item-actions { display: flex; align-items: center; gap: 0; }
 
 .queue-item-actions button {
@@ -513,6 +525,12 @@ main { width: 100%; }
 .queue-item-actions button svg { width: 15px; height: 15px; }
 .queue-item-actions button:active { transform: scale(.88); color: #fff; }
 .queue-item-actions button:disabled { opacity: .28; pointer-events: none; }
+
+.queue-drag-handle {
+  touch-action: none;
+  cursor: grab;
+}
+.queue-drag-handle:active { cursor: grabbing; color: #fff; }
 
 /* ---------- 6. CARDS / LIBRARY ---------- */
 .library-list { display: flex; flex-direction: column; gap: 8px; }
@@ -655,6 +673,15 @@ main { width: 100%; }
 }
 .add-button:active { transform: scale(.9); background: rgba(255, 255, 255, .14); }
 .add-button svg { width: 19px; height: 19px; stroke: currentColor; }
+
+/* Destructive variant (delete-all) — clearly red/bolder so it reads
+   as dangerous at a glance, distinct from its neighboring buttons. */
+.add-button.danger {
+  background: rgba(255, 92, 82, .16);
+  border-color: rgba(255, 92, 82, .45);
+  color: var(--danger);
+}
+.add-button.danger:active { background: rgba(255, 92, 82, .28); }
 
 .primary-button, .secondary-button {
   min-height: 44px;
