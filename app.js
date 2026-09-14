@@ -3619,6 +3619,13 @@ function formatTime(seconds) {
 
 const WAVEFORM_BAR_COUNT = 96;
 
+// On low-end devices, loadWaveform() only fetches/decodes this many
+// bytes from the start of the file instead of the whole song — about
+// 45-60s of typical ~128kbps audio, which is enough for a real (if
+// approximate) waveform shape while keeping the decode cost small
+// and constant regardless of the track's actual length.
+const WAVEFORM_LITE_BYTE_CAP = 900 * 1024;
+
 // song.id -> Array<number> peaks (0..1), in-memory for this session
 const waveformCache = new Map();
 
@@ -3737,6 +3744,22 @@ function loadWaveform(song) {
     return;
   }
 
+  // decodeAudioData() below has to decode the *entire* fetched buffer
+  // into raw PCM before computeWaveformPeaks() can even start — for a
+  // multi-minute file that's real, unavoidable CPU work with no
+  // progress callback, and it runs right at song-open time. On a
+  // low-memory/low-core device that's long enough to be felt as the
+  // whole app hanging exactly when a new song starts. Rather than
+  // dropping the waveform there entirely, this only fetches/decodes a
+  // capped-size slice of the file on such devices (see
+  // WAVEFORM_LITE_BYTE_CAP below) — the resulting peaks only reflect
+  // that opening slice, stretched across the full bar width, but the
+  // download and decode cost drops from "whole song" to a fixed,
+  // small amount regardless of track length.
+  const lowEndDevice =
+    (typeof navigator.deviceMemory === "number" && navigator.deviceMemory <= 2) ||
+    (typeof navigator.hardwareConcurrency === "number" && navigator.hardwareConcurrency <= 2);
+
   setWaveformState("loading");
   drawWaveform(null); // clear any previous song's bars immediately
 
@@ -3764,7 +3787,15 @@ function loadWaveform(song) {
     // playback once a rebuffer has already started.
     fetch(audioUrl, {
       priority: "low",
-      signal: waveformAbortController.signal
+      signal: waveformAbortController.signal,
+      // On low-end devices, cap how many bytes we even ask for — the
+      // worker already supports Range (used elsewhere for scrubbing/
+      // metadata), so this is a normal partial request, not a hack.
+      // Starting at byte 0 keeps the format's header in the slice so
+      // decodeAudioData has what it needs for both MP3 and FLAC.
+      headers: lowEndDevice
+        ? { Range: `bytes=0-${WAVEFORM_LITE_BYTE_CAP - 1}` }
+        : undefined
     })
       .then(res => {
         if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
@@ -4656,13 +4687,29 @@ function prewarmLyricsFontSizes(lines) {
   const container = document.getElementById("playerLyrics");
   if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
 
-  const schedule =
-    (typeof requestIdleCallback === "function" && requestIdleCallback) ||
-    (cb => setTimeout(() => cb({ timeRemaining: () => 8 }), 0));
+  // Fallback for environments without requestIdleCallback (notably
+  // Telegram's iOS in-app browser on older iOS/WKWebView versions):
+  // a plain setTimeout has no real notion of idle time, so it's
+  // handed a small fixed budget instead of a fake unlimited one.
+  const hasIdleCallback = typeof requestIdleCallback === "function";
+  const schedule = hasIdleCallback
+    ? requestIdleCallback
+    : (cb => setTimeout(() => cb({ timeRemaining: () => 6, didTimeout: false }), 0));
 
   let i = 0;
 
-  function step() {
+  // Previously this ignored the `deadline` requestIdleCallback hands
+  // to its callback and always forced through exactly 4 lines per
+  // slot, no matter how little idle time was actually available.
+  // Each line can cost up to ~7 synchronous layout passes
+  // (measureLyricsFontSize's binary search), so on a busy/weak
+  // device that was real, uncapped main-thread work landing in
+  // back-to-back callbacks — felt as the phone hanging/slowing down
+  // right as a song's lyrics loaded. Now every line checks the
+  // remaining idle time first and yields (reschedules) the moment
+  // it runs out, so this can never outrun the time the browser
+  // actually said was free.
+  function step(deadline) {
     if (token !== lyricsPrewarmToken) return; // superseded by a newer song's lines
 
     const liveContainer = document.getElementById("playerLyrics");
@@ -4670,12 +4717,17 @@ function prewarmLyricsFontSizes(lines) {
       return; // box got hidden again meanwhile — stop, openFullPlayer() will resume this
     }
 
+    const hasTime = () =>
+      deadline && typeof deadline.timeRemaining === "function"
+        ? deadline.timeRemaining() > 0
+        : true;
+
+    // Hard cap per slot on top of the deadline check, so a
+    // browser that reports a generous/unreliable timeRemaining()
+    // still can't process an entire long lyrics file in one go.
     let processed = 0;
 
-    // A handful of lines per slot keeps each individual chunk cheap
-    // (this is still real layout work, just moved off the playback
-    // path and spread out instead of done all at once).
-    while (i < lines.length && processed < 4) {
+    while (i < lines.length && processed < 4 && hasTime()) {
       const text = (lines[i].text || "").trim();
 
       if (text) {
