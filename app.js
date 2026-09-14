@@ -2491,17 +2491,27 @@ function setupPlayer() {
     state.isPlaying = true;
     updatePlayButtons();
     startWaveformAnim();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+    }
   });
 
   audio.addEventListener("pause", () => {
     state.isPlaying = false;
     updatePlayButtons();
     stopWaveformAnim();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+    }
   });
 
   audio.addEventListener("timeupdate", updateProgress);
   audio.addEventListener("loadedmetadata", updateDuration);
   audio.addEventListener("ended", handleSongEnded);
+
+  setupMediaSessionHandlers();
 
   // Mobile connections (especially inside Telegram's in-app browser)
   // routinely drop or stall mid-stream. Without this, the <audio>
@@ -2626,6 +2636,114 @@ function togglePlay() {
     audio.play().catch(console.error);
   } else {
     audio.pause();
+  }
+}
+
+// --- Media Session (lock screen / Control Center / Telegram in-app
+// browser now-playing controls) ---------------------------------
+//
+// Without this, iOS/Android show only a generic "now playing" card
+// with no title/artist/artwork and the transport buttons don't
+// actually reach this player. Everything below is additive: it
+// mirrors state that already exists (state.currentSong, audio.*)
+// into the browser's mediaSession API and never changes playback
+// logic itself.
+
+// Sets title/artist/artwork so the lock screen shows the real song
+// instead of a blank/generic entry. Cheap to call on every
+// updatePlayerUI() — the browser just replaces the metadata object.
+function updateMediaSessionMetadata(song) {
+  if (!("mediaSession" in navigator)) return;
+
+  const title = song.title || "Unknown";
+  const artist = song.artist || "Unknown Artist";
+  const artwork = [];
+
+  if (song.cover_url) {
+    const resolvedCover = resolveCoverUrl(song.cover_url);
+
+    // Multiple declared sizes pointing at the same image are fine —
+    // the OS just picks whichever it prefers to render; we don't
+    // have separate resized assets to offer.
+    ["96x96", "192x192", "256x256", "384x384", "512x512"].forEach(
+      sizes => {
+        artwork.push({ src: resolvedCover, sizes, type: "image/jpeg" });
+      }
+    );
+  }
+
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title,
+      artist,
+      album: "White Playlist",
+      artwork
+    });
+  } catch (err) {
+    console.error("MediaSession metadata:", err);
+  }
+}
+
+// Keeps the lock-screen scrub bar and elapsed/remaining time in
+// sync with the actual <audio> position. Safe to call frequently —
+// setPositionState() just overwrites the previous snapshot.
+function updateMediaSessionPositionState() {
+  if (
+    !("mediaSession" in navigator) ||
+    !("setPositionState" in navigator.mediaSession)
+  ) {
+    return;
+  }
+
+  if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: audio.duration,
+      playbackRate: audio.playbackRate || 1,
+      position: Math.min(audio.currentTime, audio.duration)
+    });
+  } catch (err) {
+    // Can throw transiently while a new track's duration hasn't
+    // settled yet (e.g. right after audio.src changes) — the next
+    // timeupdate/loadedmetadata tick will just retry.
+  }
+}
+
+// Wires the lock screen / Control Center transport buttons to the
+// same functions the in-app controls already use. Called once from
+// setupPlayer(); the handlers stay valid across song changes since
+// they read state.currentSong/audio at call time, not at setup time.
+function setupMediaSessionHandlers() {
+  if (!("mediaSession" in navigator)) return;
+
+  navigator.mediaSession.setActionHandler("play", () => {
+    audio.play().catch(console.error);
+  });
+
+  navigator.mediaSession.setActionHandler("pause", () => {
+    audio.pause();
+  });
+
+  navigator.mediaSession.setActionHandler("previoustrack", previousSong);
+  navigator.mediaSession.setActionHandler("nexttrack", nextSong);
+
+  navigator.mediaSession.setActionHandler("stop", () => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+
+  try {
+    navigator.mediaSession.setActionHandler("seekto", details => {
+      if (details.fastSeek && "fastSeek" in audio) {
+        audio.fastSeek(details.seekTime);
+      } else {
+        audio.currentTime = details.seekTime;
+      }
+      updateMediaSessionPositionState();
+    });
+  } catch (err) {
+    // Some older WebViews don't support "seekto" — safe to skip.
   }
 }
 
@@ -2766,6 +2884,8 @@ function updatePlayerUI() {
     ICONS.music
   );
 
+  updateMediaSessionMetadata(song);
+
   miniPlayer.classList.remove("hidden");
 
   updatePlayerLike();
@@ -2898,11 +3018,14 @@ function updateProgress() {
   // existing listener instead of adding new "timeupdate" listeners.
   redrawWaveformProgress();
   updateLyricsSync();
+  updateMediaSessionPositionState();
 }
 
 function updateDuration() {
   document.getElementById("duration").textContent =
     formatTime(audio.duration);
+
+  updateMediaSessionPositionState();
 }
 
 function formatTime(seconds) {
