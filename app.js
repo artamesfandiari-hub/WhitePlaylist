@@ -2661,6 +2661,13 @@ function togglePlay() {
 // off instead of overwriting the metadata of whatever's playing now.
 let mediaSessionArtworkToken = 0;
 
+// Sizes to generate for the lock screen. 128 is required for the
+// compact player to show anything at all (see note below); 512 is
+// included alongside it so the full-screen/expanded player — which
+// can display it — gets a sharp image instead of an upscaled,
+// blurry 128px one.
+const MEDIA_SESSION_ARTWORK_SIZES = [128, 512];
+
 // Sets title/artist immediately, then artwork once it's ready.
 // Called on every updatePlayerUI().
 function updateMediaSessionMetadata(song) {
@@ -2685,8 +2692,11 @@ function updateMediaSessionMetadata(song) {
 
   const token = ++mediaSessionArtworkToken;
 
-  resizeCoverForMediaSession(resolveCoverUrl(song.cover_url), 128)
-    .then(dataUrl => {
+  resizeCoverForMediaSession(
+    resolveCoverUrl(song.cover_url),
+    MEDIA_SESSION_ARTWORK_SIZES
+  )
+    .then(artwork => {
       // Superseded by a newer song while the resize was in flight —
       // the newer call owns the metadata now.
       if (token !== mediaSessionArtworkToken) return;
@@ -2696,7 +2706,7 @@ function updateMediaSessionMetadata(song) {
         title,
         artist,
         album: "White Playlist",
-        artwork: [{ src: dataUrl, sizes: "128x128", type: "image/jpeg" }]
+        artwork
       });
     })
     .catch(err => console.error("MediaSession artwork:", err));
@@ -2704,25 +2714,38 @@ function updateMediaSessionMetadata(song) {
 
 // iOS's compact lock-screen player only reliably shows artwork when
 // handed a genuinely small image — a full-size photo merely labeled
-// with a small "sizes" value still renders as a blank grey box.
-// Downscales via canvas instead, reusing the same crossOrigin="anonymous"
-// image-loading approach updatePlayerDynamicColor() already uses
-// successfully with this same cover URL elsewhere in this file.
-function resizeCoverForMediaSession(coverUrl, size) {
+// with a small "sizes" value still renders as a blank grey box. So
+// this generates several real resized copies (one canvas draw per
+// size, from a single image load) instead of relabeling one image
+// multiple times: a small one the compact player can actually use,
+// and a larger one for wherever the OS can afford to show it sharp.
+//
+// Reuses the same crossOrigin="anonymous" image-loading approach
+// updatePlayerDynamicColor() already uses successfully with this
+// same cover URL elsewhere in this file.
+function resizeCoverForMediaSession(coverUrl, sizes) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
       try {
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
+        const artwork = sizes.map(size => {
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
 
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, size, size);
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, size, size);
 
-        resolve(canvas.toDataURL("image/jpeg", 0.85));
+          return {
+            src: canvas.toDataURL("image/jpeg", 0.9),
+            sizes: `${size}x${size}`,
+            type: "image/jpeg"
+          };
+        });
+
+        resolve(artwork);
       } catch (err) {
         reject(err);
       }
