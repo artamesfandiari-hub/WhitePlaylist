@@ -2656,39 +2656,81 @@ function togglePlay() {
 // into the browser's mediaSession API and never changes playback
 // logic itself.
 
-// Sets title/artist/artwork so the lock screen shows the real song
-// instead of a blank/generic entry. Cheap to call on every
-// updatePlayerUI() — the browser just replaces the metadata object.
+// Bumped on every call so an in-flight artwork resize for a song the
+// user already skipped away from can recognize it's stale and back
+// off instead of overwriting the metadata of whatever's playing now.
+let mediaSessionArtworkToken = 0;
+
+// Sets title/artist immediately, then artwork once it's ready.
+// Called on every updatePlayerUI().
 function updateMediaSessionMetadata(song) {
   if (!("mediaSession" in navigator)) return;
 
   const title = song.title || "Unknown";
   const artist = song.artist || "Unknown Artist";
-  const artwork = [];
-
-  if (song.cover_url) {
-    const resolvedCover = resolveCoverUrl(song.cover_url);
-
-    // Multiple declared sizes pointing at the same image are fine —
-    // the OS just picks whichever it prefers to render; we don't
-    // have separate resized assets to offer.
-    ["96x96", "192x192", "256x256", "384x384", "512x512"].forEach(
-      sizes => {
-        artwork.push({ src: resolvedCover, sizes, type: "image/jpeg" });
-      }
-    );
-  }
 
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title,
       artist,
       album: "White Playlist",
-      artwork
+      artwork: []
     });
   } catch (err) {
     console.error("MediaSession metadata:", err);
+    return;
   }
+
+  if (!song.cover_url) return;
+
+  const token = ++mediaSessionArtworkToken;
+
+  resizeCoverForMediaSession(resolveCoverUrl(song.cover_url), 128)
+    .then(dataUrl => {
+      // Superseded by a newer song while the resize was in flight —
+      // the newer call owns the metadata now.
+      if (token !== mediaSessionArtworkToken) return;
+      if (!state.currentSong || state.currentSong.id !== song.id) return;
+
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        album: "White Playlist",
+        artwork: [{ src: dataUrl, sizes: "128x128", type: "image/jpeg" }]
+      });
+    })
+    .catch(err => console.error("MediaSession artwork:", err));
+}
+
+// iOS's compact lock-screen player only reliably shows artwork when
+// handed a genuinely small image — a full-size photo merely labeled
+// with a small "sizes" value still renders as a blank grey box.
+// Downscales via canvas instead, reusing the same crossOrigin="anonymous"
+// image-loading approach updatePlayerDynamicColor() already uses
+// successfully with this same cover URL elsewhere in this file.
+function resizeCoverForMediaSession(coverUrl, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, size, size);
+
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    img.onerror = () => reject(new Error("Cover image failed to load"));
+    img.src = coverUrl;
+  });
 }
 
 // Keeps the lock-screen scrub bar and elapsed/remaining time in
