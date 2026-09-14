@@ -1042,15 +1042,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   position: relative; z-index: 2;
   transition: transform var(--dur-fast) var(--ease);
 }
-/* .mini-like (a small icon toggle) keeps the same firm press feedback
-   as the app's other icon-only buttons. .mini-play gets its own,
-   gentler value matching .main-play — the app's actual play/pause
-   button in the full player — instead of sharing mini-like's much
-   stronger .9. At only 40px, a 10% shrink-and-spring-back read as an
-   exaggerated pop next to every other play/pause control in the app,
-   which all use a subtle scale in the .94-.985 range. */
-.mini-like:active { transform: scale(.9); }
-.mini-play:active { transform: scale(.94); }
+.mini-like:active, .mini-play:active { transform: scale(.9); }
 .mini-like svg { width: 20px; height: 20px; }
 .mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
 .mini-play svg { width: 19px; height: 19px; }
