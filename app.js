@@ -509,9 +509,9 @@ async function generateSmartMix() {
   const card = document.getElementById("smartMixButton");
   const playIcon = document.getElementById("smartMixPlay");
 
-  if (card.classList.contains("loading")) return;
+  if (card.classList.contains("is-loading")) return;
 
-  card.classList.add("loading");
+  card.classList.add("is-loading");
   playIcon.classList.add("spinning");
 
   try {
@@ -529,7 +529,7 @@ async function generateSmartMix() {
     console.error("Smart Mix:", error);
     alert(error.message || "Couldn't generate Smart Mix.");
   } finally {
-    card.classList.remove("loading");
+    card.classList.remove("is-loading");
     playIcon.classList.remove("spinning");
   }
 }
@@ -3495,6 +3495,7 @@ function updatePlayButtons() {
   if (mini) {
     mini.innerHTML =
       state.isPlaying ? ICONS.pause : ICONS.play;
+    mini.classList.toggle("is-pause", state.isPlaying);
   }
 
   if (main) {

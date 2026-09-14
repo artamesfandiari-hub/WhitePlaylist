@@ -881,7 +881,15 @@ main { width: 100%; }
 }
 
 .smart-mix-card:active { transform: scale(.985); }
-.smart-mix-card.loading { opacity: .7; pointer-events: none; }
+/* Renamed from the generic ".loading" state class: that bare class
+   also styles the standalone "Loading..." placeholder divs used
+   elsewhere (padding: 35px 10px; text-align: center; ...), and
+   since both rules share specificity, source order let the generic
+   rule silently overwrite this card's padding whenever the button
+   picked up class="loading" — inflating the card height for the
+   whole duration of the fetch. ".is-loading" is scoped to just this
+   button, so it can never collide with that shared class again. */
+.smart-mix-card.is-loading { opacity: .7; pointer-events: none; }
 
 .smart-mix-text { min-width: 0; }
 .smart-mix-label {
@@ -1035,17 +1043,27 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .mini-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; font-weight: 650; }
 .mini-artist { margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-size: 11px; }
 
+/* Sized to match .continue-play / .smart-mix-play (46px circle,
+   20px icon) so every play/pause button in the app reads as the
+   same control — this one used to be a smaller 40px/19px pair and
+   visibly mismatched the others whenever both showed on screen at
+   once (mini player floating over a Continue Listening row). */
 .mini-like, .mini-play {
-  width: 40px; height: 40px;
+  width: 46px; height: 46px;
   display: flex; align-items: center; justify-content: center;
-  flex: 0 0 40px;
+  flex: 0 0 46px;
   position: relative; z-index: 2;
   transition: transform var(--dur-fast) var(--ease);
 }
 .mini-like:active, .mini-play:active { transform: scale(.9); }
 .mini-like svg { width: 20px; height: 20px; }
 .mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
-.mini-play svg { width: 19px; height: 19px; }
+.mini-play svg { width: 20px; height: 20px; margin-left: 2px; fill: currentColor; stroke: none; }
+/* Same optical-centering fix as .continue-play/.smart-mix-play:
+   the play triangle's margin-left nudges it into the visual center
+   of the circle; drop that nudge once the icon swaps to the
+   (already symmetric) pause bars. */
+.mini-play.is-pause svg { margin-left: 0; }
 
 /* FULL PLAYER */
 .player-overlay {
@@ -1479,7 +1497,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 /* Shared icon stroke rules */
 .icon-button svg, .song-cover svg, .song-actions svg, .library-icon svg,
 .library-arrow svg, .back-button svg, .add-button svg, .mini-cover svg,
-.mini-like svg, .mini-play svg, .player-close svg, .nav-item svg,
+.mini-like svg, .player-close svg, .nav-item svg,
 .player-controls button:not(.main-play) svg,
 .hcard-cover svg, .continue-cover svg, .player-cover svg,
 .playlist-card-cover svg, .artist-card-cover svg,
@@ -1491,6 +1509,13 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* .mini-play is deliberately excluded above: unlike the outline
+   icons in that shared list, it's a solid play/pause control (like
+   .continue-play / .smart-mix-play) and needs fill: currentColor,
+   set right after those buttons' own rules near .mini-player. That
+   shared rule used to include it and forced fill:none/stroke-only
+   on it, which is why its triangle/bars rendered hollow while every
+   other play/pause button in the app was solid white-on-black. */
 
 /* Placeholder note/list/person glyphs used when a song, album,
    playlist, or artist has no cover art. Without an explicit
