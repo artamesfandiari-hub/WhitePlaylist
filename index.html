@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260914-4">
+  <link rel="stylesheet" href="style.css?v=20260914-5">
 </head>
 
 <body>
@@ -210,20 +210,51 @@
         <div class="page-title-row">
           <h1>Songs</h1>
 
-          <button
-            class="add-button"
-            id="deleteAllSongsButton"
-            aria-label="Delete all songs"
-            style="background: none; color: #777;"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" style="stroke: currentColor; stroke-width: 2; fill: none;">
-              <path d="M4 7h16"></path>
-              <path d="M9 7V4h6v3"></path>
-              <path d="M6 7l1 13h10l1-13"></path>
-              <path d="M10 11v6"></path>
-              <path d="M14 11v6"></path>
-            </svg>
-          </button>
+          <div class="page-title-actions">
+            <button
+              class="add-button"
+              id="selectSongsButton"
+              aria-label="Select songs"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="stroke: currentColor; stroke-width: 2; fill: none;">
+                <rect x="4" y="4" width="16" height="16" rx="4"></rect>
+                <polyline points="8 12.5 11 15.5 16.5 9"></polyline>
+              </svg>
+            </button>
+
+            <button
+              class="add-button"
+              id="deleteAllSongsButton"
+              aria-label="Delete all songs"
+              style="background: none; color: #777;"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="stroke: currentColor; stroke-width: 2; fill: none;">
+                <path d="M4 7h16"></path>
+                <path d="M9 7V4h6v3"></path>
+                <path d="M6 7l1 13h10l1-13"></path>
+                <path d="M10 11v6"></path>
+                <path d="M14 11v6"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="songs-toolbar">
+          <select id="songsSortSelect" class="songs-sort-select" aria-label="Sort songs">
+            <option value="recent">Recently Added</option>
+            <option value="title">Title (A–Z)</option>
+            <option value="artist">Artist (A–Z)</option>
+          </select>
+        </div>
+
+        <div class="select-bar hidden" id="songsSelectBar">
+          <span id="songsSelectCount">0 selected</span>
+
+          <div class="select-bar-actions">
+            <button type="button" id="songsSelectAddPlaylist">Add to Playlist</button>
+            <button type="button" id="songsSelectDelete" class="danger">Delete</button>
+            <button type="button" id="songsSelectCancel">Cancel</button>
+          </div>
         </div>
 
         <div
@@ -512,6 +543,32 @@
       </div>
     </div>
 
+    <!-- UP NEXT / QUEUE MODAL -->
+    <div
+      class="modal hidden"
+      id="queueModal"
+    >
+      <div class="modal-card">
+
+        <h2>Up Next</h2>
+
+        <div
+          class="song-list queue-list"
+          id="queueList"
+        >
+          <div class="empty">Queue is empty.</div>
+        </div>
+
+        <button
+          class="secondary-button full-button"
+          id="closeQueueModal"
+        >
+          Close
+        </button>
+
+      </div>
+    </div>
+
     <!-- CONFIRMATION MODAL -->
     <div
       class="modal hidden"
@@ -615,17 +672,33 @@
             </svg>
           </button>
 
-          <button
-            class="player-menu-btn"
-            id="playerMenuButton"
-            aria-label="Track options"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none;">
-              <circle cx="5" cy="12" r="2"></circle>
-              <circle cx="12" cy="12" r="2"></circle>
-              <circle cx="19" cy="12" r="2"></circle>
-            </svg>
-          </button>
+          <div class="player-top-actions">
+            <button
+              class="player-menu-btn"
+              id="playerQueueButton"
+              aria-label="Up next"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none;">
+                <line x1="4" y1="6" x2="15" y2="6"></line>
+                <line x1="4" y1="12" x2="15" y2="12"></line>
+                <line x1="4" y1="18" x2="11" y2="18"></line>
+                <circle cx="19" cy="16" r="2.4"></circle>
+                <path d="M21 16V7l-3 1"></path>
+              </svg>
+            </button>
+
+            <button
+              class="player-menu-btn"
+              id="playerMenuButton"
+              aria-label="Track options"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none;">
+                <circle cx="5" cy="12" r="2"></circle>
+                <circle cx="12" cy="12" r="2"></circle>
+                <circle cx="19" cy="12" r="2"></circle>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div
@@ -924,7 +997,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260914-4"></script>
+  <script src="app.js?v=20260914-5"></script>
 
 </body>
 </html>

@@ -235,6 +235,31 @@ const ICONS = {
       <circle cx="12" cy="12" r="2"></circle>
       <circle cx="19" cy="12" r="2"></circle>
     </svg>
+  `,
+
+  checkCircle: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <polyline points="8 12.5 11 15.5 16.5 9"></polyline>
+    </svg>
+  `,
+
+  close: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+    </svg>
+  `,
+
+  chevronUp: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <polyline points="6 15 12 9 18 15"></polyline>
+    </svg>
+  `,
+
+  chevronDown: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
   `
 };
 
@@ -308,6 +333,7 @@ async function init() {
   setupSearch();
   setupPlayer();
   setupModals();
+  setupSongsSelectMode();
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
@@ -914,6 +940,28 @@ async function loadSongs() {
   }
 }
 
+// Purely a display order for the Songs page — the backend's own
+// order (created_at DESC, i.e. "recent") is left untouched in
+// state.songs itself, so every other screen (Home, search, queue
+// context elsewhere) is unaffected by whatever sort is picked here.
+let songsSortMode = "recent";
+
+function getSortedSongs() {
+  const list = state.songs.slice();
+
+  if (songsSortMode === "title") {
+    list.sort((a, b) =>
+      (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" })
+    );
+  } else if (songsSortMode === "artist") {
+    list.sort((a, b) =>
+      (a.artist || "").localeCompare(b.artist || "", undefined, { sensitivity: "base" })
+    );
+  }
+
+  return list;
+}
+
 function renderSongs() {
   const container = document.getElementById("allSongs");
 
@@ -922,8 +970,168 @@ function renderSongs() {
     return;
   }
 
-  container.innerHTML = state.songs.map(songHTML).join("");
-  bindSongButtons(container, state.songs);
+  const sorted = getSortedSongs();
+
+  container.innerHTML = sorted.map(songHTML).join("");
+  bindSongButtons(container, sorted);
+
+  // A fresh render replaces every row, so re-apply the select-mode
+  // container class and any still-selected rows (selection itself,
+  // selectedSongIds, is left untouched — only the markup was rebuilt).
+  container.classList.toggle("select-mode", songsSelectMode);
+  if (songsSelectMode) {
+    container.querySelectorAll(".song-item").forEach(item => {
+      const id = Number(item.dataset.songId);
+      item.classList.toggle("selected", selectedSongIds.has(id));
+    });
+  }
+}
+
+/* =========================================================
+   SONGS — SELECT MODE (bulk delete / bulk add to playlist)
+   ========================================================= */
+
+let songsSelectMode = false;
+let selectedSongIds = new Set();
+
+function setSongsSelectMode(active) {
+  songsSelectMode = active;
+  selectedSongIds = new Set();
+
+  const container = document.getElementById("allSongs");
+  container?.classList.toggle("select-mode", active);
+  container?.querySelectorAll(".song-item.selected").forEach(item => {
+    item.classList.remove("selected");
+  });
+
+  document
+    .getElementById("selectSongsButton")
+    ?.classList.toggle("active", active);
+
+  updateSongsSelectBar();
+}
+
+function toggleSongSelection(id, itemEl) {
+  if (selectedSongIds.has(id)) {
+    selectedSongIds.delete(id);
+  } else {
+    selectedSongIds.add(id);
+  }
+
+  itemEl.classList.toggle("selected", selectedSongIds.has(id));
+  updateSongsSelectBar();
+}
+
+function updateSongsSelectBar() {
+  const bar = document.getElementById("songsSelectBar");
+  const countEl = document.getElementById("songsSelectCount");
+  if (!bar || !countEl) return;
+
+  const n = selectedSongIds.size;
+  countEl.textContent = `${n} selected`;
+  bar.classList.toggle("hidden", !songsSelectMode);
+}
+
+// Runs in the capture phase so it intercepts the click before it
+// reaches the row's own play/menu button listeners (added in
+// bindSongButtons) — letting select mode reuse songHTML/bindSongButtons
+// unchanged instead of forking the Songs list into a second renderer.
+function setupSongsSelectMode() {
+  const container = document.getElementById("allSongs");
+  if (!container) return;
+
+  container.addEventListener("click", event => {
+    if (!songsSelectMode) return;
+    if (event.target.closest(".song-menu-btn")) return;
+
+    const item = event.target.closest(".song-item");
+    if (!item) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    toggleSongSelection(Number(item.dataset.songId), item);
+  }, true);
+
+  document
+    .getElementById("selectSongsButton")
+    ?.addEventListener("click", () => {
+      setSongsSelectMode(!songsSelectMode);
+    });
+
+  document
+    .getElementById("songsSelectCancel")
+    ?.addEventListener("click", () => setSongsSelectMode(false));
+
+  document
+    .getElementById("songsSelectDelete")
+    ?.addEventListener("click", () => {
+      if (!selectedSongIds.size) return;
+
+      const ids = [...selectedSongIds];
+
+      showConfirmationModal(
+        "Delete Songs",
+        `Delete ${ids.length} song${ids.length === 1 ? "" : "s"}? This removes them from your library, playlists and favorites.`,
+        () => bulkDeleteSongs(ids)
+      );
+    });
+
+  document
+    .getElementById("songsSelectAddPlaylist")
+    ?.addEventListener("click", () => {
+      if (!selectedSongIds.size) return;
+      openAddToPlaylist([...selectedSongIds]);
+    });
+
+  document
+    .getElementById("songsSortSelect")
+    ?.addEventListener("change", event => {
+      songsSortMode = event.target.value;
+      renderSongs();
+    });
+}
+
+async function bulkDeleteSongs(ids) {
+  try {
+    await Promise.allSettled(
+      ids.map(id => api(`/songs/${id}`, { method: "DELETE" }))
+    );
+
+    if (
+      state.currentSong &&
+      ids.includes(Number(state.currentSong.id))
+    ) {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      state.currentSong = null;
+      state.isPlaying = false;
+      state.queue = [];
+      state.queueIndex = -1;
+      updatePlayButtons();
+      miniPlayer?.classList.add("hidden");
+    }
+
+    setSongsSelectMode(false);
+
+    await Promise.allSettled([
+      loadSongs(),
+      loadFavorites(),
+      loadArtists(),
+      loadAlbums(),
+      loadPlaylists(),
+      loadHomeInsights()
+    ]);
+
+    renderHomeDashboard();
+
+    alert(`Deleted ${ids.length} song${ids.length === 1 ? "" : "s"}.`);
+  } catch (error) {
+    console.error("Bulk delete songs:", error);
+    alert(error.message || "Couldn't delete songs.");
+  }
 }
 
 function renderRecentSongs() {
@@ -952,6 +1160,10 @@ function songHTML(song) {
 
   return `
     <div class="song-item" data-song-id="${song.id}">
+
+      <div class="song-select-indicator" aria-hidden="true">
+        ${ICONS.checkCircle}
+      </div>
 
       <button
         class="song-cover"
@@ -2273,10 +2485,16 @@ async function createPlaylist() {
    ADD TO PLAYLIST
    ========================================================= */
 
-let selectedSongForPlaylist = null;
+let selectedSongIdsForPlaylist = [];
 
-async function openAddToPlaylist(song) {
-  selectedSongForPlaylist = song;
+// Accepts either a single song object (⋯ menu -> Add to Playlist) or
+// an array of song ids (Songs page select mode -> Add to Playlist).
+// Both paths share the same modal/list and just POST once per id.
+async function openAddToPlaylist(songOrIds) {
+  selectedSongIdsForPlaylist =
+    Array.isArray(songOrIds)
+      ? songOrIds.map(Number)
+      : [Number(songOrIds.id)];
 
   const modal =
     document.getElementById("addToPlaylistModal");
@@ -2325,15 +2543,22 @@ async function openAddToPlaylist(song) {
         Number(button.dataset.addPlaylistId);
 
       try {
-        await api(`/playlists/${playlistId}/songs`, {
-          method: "POST",
-          body: JSON.stringify({
-            song_id: selectedSongForPlaylist.id
-          })
-        });
+        await Promise.allSettled(
+          selectedSongIdsForPlaylist.map(songId =>
+            api(`/playlists/${playlistId}/songs`, {
+              method: "POST",
+              body: JSON.stringify({ song_id: songId })
+            })
+          )
+        );
 
         modal.classList.add("hidden");
         await loadPlaylists();
+
+        if (selectedSongIdsForPlaylist.length > 1) {
+          setSongsSelectMode(false);
+          alert(`Added ${selectedSongIdsForPlaylist.length} songs to playlist.`);
+        }
       } catch (error) {
         alert(error.message);
       }
@@ -2445,6 +2670,14 @@ function setupPlayer() {
         openSongActionsMenu(state.currentSong, { type: "player" });
       }
     });
+
+  document
+    .getElementById("playerQueueButton")
+    ?.addEventListener("click", openQueueModal);
+
+  document
+    .getElementById("closeQueueModal")
+    ?.addEventListener("click", closeQueueModal);
 
   document
     .getElementById("mainPlay")
@@ -2915,6 +3148,139 @@ function previousSong() {
 
   state.queueIndex = index;
   startPlayback(state.queue[index]);
+}
+
+/* =========================================================
+   UP NEXT (queue modal)
+   Reuses the existing state.queue/state.queueIndex that already
+   drives Next/Previous/Shuffle — this just gives it a screen, plus
+   simple up/down reordering and remove-from-queue.
+   ========================================================= */
+
+function openQueueModal() {
+  renderQueueModal();
+  document.getElementById("queueModal")?.classList.remove("hidden");
+}
+
+function closeQueueModal() {
+  document.getElementById("queueModal")?.classList.add("hidden");
+}
+
+function renderQueueModal() {
+  const container = document.getElementById("queueList");
+  if (!container) return;
+
+  if (!state.queue.length) {
+    container.innerHTML = `<div class="empty">Queue is empty.</div>`;
+    return;
+  }
+
+  container.innerHTML = state.queue.map((song, index) => {
+    const isCurrent = index === state.queueIndex;
+    const artist = song.artist || "Unknown Artist";
+
+    return `
+      <div class="song-item${isCurrent ? " playing" : ""}" data-song-id="${song.id}">
+
+        <button
+          class="song-cover"
+          data-queue-action="play"
+          data-index="${index}"
+          aria-label="Play ${escapeHTML(song.title || "song")}"
+        >
+          ${coverInnerHTML(song.cover_url, song.title)}
+        </button>
+
+        <button
+          class="song-info"
+          data-queue-action="play"
+          data-index="${index}"
+          style="text-align:left"
+        >
+          <div class="song-title">${escapeHTML(song.title || "Unknown")}</div>
+          <div class="song-meta">${escapeHTML(artist)}</div>
+        </button>
+
+        <div class="queue-item-actions">
+          <button
+            data-queue-action="up"
+            data-index="${index}"
+            aria-label="Move up"
+            ${index === 0 ? "disabled" : ""}
+          >${ICONS.chevronUp}</button>
+
+          <button
+            data-queue-action="down"
+            data-index="${index}"
+            aria-label="Move down"
+            ${index === state.queue.length - 1 ? "disabled" : ""}
+          >${ICONS.chevronDown}</button>
+
+          <button
+            data-queue-action="remove"
+            data-index="${index}"
+            aria-label="Remove from queue"
+            ${isCurrent ? "disabled" : ""}
+          >${ICONS.close}</button>
+        </div>
+
+      </div>
+    `;
+  }).join("");
+
+  container.querySelectorAll("[data-queue-action]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const action = button.dataset.queueAction;
+      const index = Number(button.dataset.index);
+
+      if (action === "play") jumpToQueueIndex(index);
+      if (action === "up") moveQueueItem(index, -1);
+      if (action === "down") moveQueueItem(index, 1);
+      if (action === "remove") removeFromQueue(index);
+    });
+  });
+}
+
+function jumpToQueueIndex(index) {
+  const song = state.queue[index];
+  if (!song) return;
+
+  state.queueIndex = index;
+  startPlayback(song);
+  closeQueueModal();
+}
+
+function moveQueueItem(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= state.queue.length) return;
+
+  const queue = state.queue;
+  [queue[index], queue[target]] = [queue[target], queue[index]];
+
+  // Keep queueIndex pointing at whichever song is actually playing,
+  // since it just swapped positions along with everything else.
+  if (state.queueIndex === index) {
+    state.queueIndex = target;
+  } else if (state.queueIndex === target) {
+    state.queueIndex = index;
+  }
+
+  renderQueueModal();
+}
+
+function removeFromQueue(index) {
+  if (index === state.queueIndex) return;
+
+  state.queue.splice(index, 1);
+
+  if (index < state.queueIndex) {
+    state.queueIndex -= 1;
+  }
+
+  renderQueueModal();
 }
 
 // Updates the full-player title/artist immediately whenever the song

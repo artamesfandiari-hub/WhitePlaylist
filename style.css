@@ -404,6 +404,116 @@ main { width: 100%; }
   font-variant-numeric: tabular-nums;
 }
 
+/* SONGS TOOLBAR (sort) + SELECT MODE (bulk actions) */
+.page-title-actions { display: flex; align-items: center; gap: 8px; }
+
+.add-button.active { background: #fff; color: #000; }
+
+.songs-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.songs-sort-select {
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-md);
+  background: var(--glass-fill);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.select-bar span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.select-bar-actions { display: flex; align-items: center; gap: 8px; }
+
+.select-bar-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--glass-fill-active);
+  border: 1px solid var(--border-strong);
+  color: #fff;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur) var(--ease);
+}
+
+.select-bar-actions button:active { transform: scale(.95); }
+.select-bar-actions button.danger { color: var(--danger); }
+
+/* Selection indicator sits over the top-left corner of the row and
+   only appears once the container has .select-mode — it stays
+   display:none everywhere else (Home, Favorites, Playlists, Search),
+   so songHTML() can be reused unchanged across every list. */
+.song-select-indicator {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  border: 1.5px solid var(--border-strong);
+  color: transparent;
+  z-index: 2;
+}
+
+.song-select-indicator svg { width: 13px; height: 13px; }
+
+.song-list.select-mode .song-select-indicator { display: flex; }
+.song-item.selected { background: var(--glass-fill-active); }
+.song-item.selected .song-select-indicator {
+  background: #fff;
+  border-color: #fff;
+  color: #000;
+}
+.song-item.selected .song-cover { opacity: .55; }
+
+/* UP NEXT / QUEUE MODAL */
+.queue-list { max-height: 56vh; overflow-y: auto; margin: -2px; padding: 2px; }
+
+.queue-item-actions { display: flex; align-items: center; gap: 0; }
+
+.queue-item-actions button {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
+}
+
+.queue-item-actions button svg { width: 15px; height: 15px; }
+.queue-item-actions button:active { transform: scale(.88); color: #fff; }
+.queue-item-actions button:disabled { opacity: .28; pointer-events: none; }
+
 /* ---------- 6. CARDS / LIBRARY ---------- */
 .library-list { display: flex; flex-direction: column; gap: 8px; }
 
@@ -982,15 +1092,21 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-close:active { transform: translateX(-8px) scale(.9); color: #fff; }
 .player-close svg { width: 21px; height: 21px; }
 
+.player-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(8px);
+}
+
 .player-menu-btn {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
-  transform: translateX(8px);
   transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
 }
 .player-menu-btn svg { width: 20px; height: 20px; }
-.player-menu-btn:active { transform: translateX(8px) scale(.9); color: #fff; }
+.player-menu-btn:active { transform: scale(.9); color: #fff; }
 
 .player-cover {
   width: min(90vw, 340px, calc(var(--app-vh, 100dvh) * 0.28));
@@ -1329,7 +1445,8 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-controls button:not(.main-play) svg,
 .hcard-cover svg, .continue-cover svg, .player-cover svg,
 .playlist-card-cover svg, .artist-card-cover svg,
-.artist-detail-cover svg, .playlist-detail-cover > svg {
+.artist-detail-cover svg, .playlist-detail-cover > svg,
+.song-select-indicator svg, .queue-item-actions svg {
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
