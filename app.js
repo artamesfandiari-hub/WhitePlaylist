@@ -3270,9 +3270,45 @@ function removeFromQueue(index) {
    container via delegation (setupQueueDragging(), called from
    init()) so it keeps working across every renderQueueModal()
    rebuild without needing to be re-attached.
+
+   Two things that used to break this, both fixed here:
+
+   1. Telegram's own in-app "swipe down to close/minimize" gesture
+      lives outside the page (native shell, not the DOM), so it can
+      steal a downward drag out from under us even with
+      preventDefault()/touch-action:none on our handle — that's why
+      only top-to-bottom drags used to also move the whole sheet.
+      We now explicitly disable it for the duration of a drag via
+      Telegram.WebApp.disableVerticalSwipes()/enableVerticalSwipes()
+      (feature-detected — older clients just no-op).
+
+   2. When the OS/Telegram did steal the pointer mid-drag, this
+      item's own pointerup/pointercancel listeners never fired
+      (the item lost the pointer without being told), so queueDrag
+      never got cleared, the row was left stuck mid-transform, and
+      every later drag on that row kept piling on another set of
+      listeners that could never be removed either — eventually the
+      list stopped responding until the page was reloaded. The
+      pointermove/up/cancel listeners are now bound once, on
+      window, for the lifetime of the app (guarded by the queueDrag
+      state instead of being added/removed per drag), plus a
+      lostpointercapture listener as a hard safety net for exactly
+      the "pointer got taken away from us" case.
    --------------------------------------------------------- */
 
 let queueDrag = null;
+
+function setQueueDragModeActive(active) {
+  document.getElementById("queueList")?.classList.toggle("is-dragging", active);
+
+  // Telegram Bot API 7.7+. Wrapped so older clients (or running
+  // outside Telegram entirely) just silently skip this.
+  if (!tg) return;
+  try {
+    if (active) tg.disableVerticalSwipes?.();
+    else tg.enableVerticalSwipes?.();
+  } catch (_) {}
+}
 
 function setupQueueDragging() {
   const container = document.getElementById("queueList");
@@ -3291,6 +3327,11 @@ function setupQueueDragging() {
 
     event.preventDefault();
 
+    // If a previous drag never got a clean end (pointer stolen,
+    // tab backgrounded, etc.), clear it out before starting a new
+    // one instead of leaving it to leak.
+    if (queueDrag) endQueueDrag({ pointerId: queueDrag.pointerId });
+
     queueDrag = {
       item,
       items,
@@ -3303,9 +3344,23 @@ function setupQueueDragging() {
 
     item.classList.add("dragging");
     item.setPointerCapture(event.pointerId);
-    item.addEventListener("pointermove", onQueueDragMove);
-    item.addEventListener("pointerup", endQueueDrag);
-    item.addEventListener("pointercancel", endQueueDrag);
+    setQueueDragModeActive(true);
+  });
+
+  // Bound once, ever — not per-drag — so there's nothing to leak
+  // and nothing that can be left half-attached if a drag ends in an
+  // unusual way.
+  window.addEventListener("pointermove", onQueueDragMove);
+  window.addEventListener("pointerup", endQueueDrag);
+  window.addEventListener("pointercancel", endQueueDrag);
+  window.addEventListener("lostpointercapture", event => {
+    if (queueDrag && event.pointerId === queueDrag.pointerId) endQueueDrag(event);
+  });
+  // Belt-and-suspenders: if the app gets backgrounded mid-drag
+  // (e.g. the user got pulled into a system gesture/overlay),
+  // don't leave the row stuck for when they come back.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && queueDrag) endQueueDrag({ pointerId: queueDrag.pointerId });
   });
 }
 
@@ -3346,15 +3401,12 @@ function endQueueDrag(event) {
 
   const { item, items, startIndex, currentIndex } = queueDrag;
 
-  item.removeEventListener("pointermove", onQueueDragMove);
-  item.removeEventListener("pointerup", endQueueDrag);
-  item.removeEventListener("pointercancel", endQueueDrag);
-
   item.classList.remove("dragging");
   item.style.transform = "";
   items.forEach(row => { if (row !== item) row.style.transform = ""; });
 
   queueDrag = null;
+  setQueueDragModeActive(false);
 
   if (currentIndex !== startIndex) {
     reorderQueue(startIndex, currentIndex);

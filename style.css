@@ -341,6 +341,14 @@ main { width: 100%; }
   animation: eqBars 1.3s ease-in-out infinite;
 }
 
+/* Dragging a row in Up Next repaints on every pointermove already;
+   freezing the equalizer for that window removes one more thing
+   competing for paint time on slower devices. Purely cosmetic —
+   it just resumes from wherever it left off once the drag ends. */
+.queue-list.is-dragging .song-item.playing .song-cover::after {
+  animation-play-state: paused;
+}
+
 @keyframes eqBars {
   0%   { background-size: 3px 35%, 3px 60%, 3px 25%, 3px 50%; }
   20%  { background-size: 3px 65%, 3px 30%, 3px 55%, 3px 30%; }
