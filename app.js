@@ -2108,6 +2108,7 @@ async function deleteSong(song) {
       state.queueIndex = -1;
       updatePlayButtons();
       miniPlayer?.classList.add("hidden");
+      closeFullPlayer();
     }
 
     await Promise.allSettled([
@@ -2143,6 +2144,7 @@ async function deleteAllSongs() {
     state.queueIndex = -1;
     updatePlayButtons();
     miniPlayer?.classList.add("hidden");
+    closeFullPlayer();
 
     await Promise.allSettled([
       loadSongs(),
