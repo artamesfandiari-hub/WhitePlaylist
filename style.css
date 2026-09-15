@@ -1367,8 +1367,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 
 
 /* PROGRESS + WAVEFORM — two separate visual layers sharing one hit
-   area. The waveform canvas (real amplitude bars, drawn by
-   drawWaveform() in app.js) sits behind and is purely visual
+   area. The waveform canvas (a real bass/mid/treble/envelope
+   frequency chart, drawn by drawWaveform() in app.js) sits behind
+   and is purely visual
    (pointer-events: none); the original #progress range input sits
    on top, unchanged functionally, so dragging/tapping anywhere in
    this area seeks exactly as before. Until a waveform is ready (or

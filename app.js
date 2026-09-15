@@ -3712,19 +3712,40 @@ function loadWaveformFromStorage(songId) {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.map(v => v / 100)
-      : null;
+
+    // Legacy cache from before the multi-band chart redesign — a
+    // flat array is still perfectly usable as the main line, it
+    // just won't have bass/mid/treble layers until this song is
+    // decoded again (which re-saves it in the new shape).
+    if (Array.isArray(parsed)) {
+      return { main: parsed.map(v => v / 100), bass: [], mid: [], treble: [] };
+    }
+
+    if (parsed && Array.isArray(parsed.main)) {
+      return {
+        main: parsed.main.map(v => v / 100),
+        bass: (parsed.bass || []).map(v => v / 100),
+        mid: (parsed.mid || []).map(v => v / 100),
+        treble: (parsed.treble || []).map(v => v / 100)
+      };
+    }
+
+    return null;
   } catch (_) {
     return null;
   }
 }
 
-// Stores peaks compactly (0-100 ints) and keeps a small LRU index so
-// this never grows unbounded across many different songs.
-function saveWaveformToStorage(songId, peaks) {
+// Stores each band compactly (0-100 ints) and keeps a small LRU
+// index so this never grows unbounded across many different songs.
+function saveWaveformToStorage(songId, data) {
   try {
-    const compact = peaks.map(v => Math.round(v * 100));
+    const compact = {
+      main: data.main.map(v => Math.round(v * 100)),
+      bass: data.bass.map(v => Math.round(v * 100)),
+      mid: data.mid.map(v => Math.round(v * 100)),
+      treble: data.treble.map(v => Math.round(v * 100))
+    };
     localStorage.setItem(
       waveformStorageKey(songId),
       JSON.stringify(compact)
@@ -3800,7 +3821,7 @@ function loadWaveform(song) {
   }
 
   // decodeAudioData() below has to decode the *entire* fetched buffer
-  // into raw PCM before computeWaveformPeaks() can even start — for a
+  // into raw PCM before computeWaveformBands() can even start — for a
   // multi-minute file that's real, unavoidable CPU work with no
   // progress callback, and it runs right at song-open time. On a
   // low-memory/low-core device that's long enough to be felt as the
@@ -3870,13 +3891,13 @@ function loadWaveform(song) {
       .then(audioBuffer => {
         if (!audioBuffer || token !== waveformRequestToken) return;
 
-        const peaks = computeWaveformPeaks(audioBuffer, WAVEFORM_BAR_COUNT);
+        const data = computeWaveformBands(audioBuffer, WAVEFORM_BAR_COUNT);
 
-        waveformCache.set(song.id, peaks);
-        saveWaveformToStorage(song.id, peaks);
+        waveformCache.set(song.id, data);
+        saveWaveformToStorage(song.id, data);
 
         if (token === waveformRequestToken) {
-          drawWaveform(peaks);
+          drawWaveform(data);
           setWaveformState("ready");
         }
       })
@@ -3920,11 +3941,14 @@ function ensureWaveformStallHandling() {
   });
 }
 
-// Downsamples channel 0 into `barCount` peak values (0..1) using the
-// max sample magnitude per bucket — this is what gives a waveform
-// its real jagged look, unlike an averaged/smoothed curve.
-function computeWaveformPeaks(audioBuffer, barCount) {
-  const channel = audioBuffer.getChannelData(0);
+// Downsamples a channel (any Float32Array-like of samples) into
+// `barCount` peak values (0..1) using the max sample magnitude per
+// bucket — this is what gives the chart its real, jagged-under-the-
+// smoothing shape, unlike an averaged/flattened curve. Shared by
+// every band in computeWaveformBands() below, each normalized to
+// its own loudest point so a quieter band (bass on a treble-heavy
+// track, say) still reads as a visible shape rather than flatlining.
+function extractPeaksFromChannel(channel, barCount) {
   const samplesPerBar = Math.max(1, Math.floor(channel.length / barCount));
 
   // For long tracks, samplesPerBar can be in the hundreds of
@@ -3954,10 +3978,64 @@ function computeWaveformPeaks(audioBuffer, barCount) {
   return peaks.map(v => Math.min(1, v / loudest));
 }
 
+// Simple one-pole IIR filters — cheap, single-pass, no FFT needed.
+// Good enough to visually separate "boomy" vs "bright" content in a
+// waveform chart; not meant to be a precise crossover.
+function onePoleLowPass(channel, sampleRate, cutoffHz) {
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  const dt = 1 / sampleRate;
+  const alpha = dt / (rc + dt);
+  const out = new Float32Array(channel.length);
+  let prev = 0;
+  for (let i = 0; i < channel.length; i++) {
+    prev += alpha * (channel[i] - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+
+function onePoleHighPass(channel, sampleRate, cutoffHz) {
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  const dt = 1 / sampleRate;
+  const alpha = rc / (rc + dt);
+  const out = new Float32Array(channel.length);
+  let prevIn = channel[0] || 0;
+  let prevOut = 0;
+  for (let i = 0; i < channel.length; i++) {
+    const x = channel[i];
+    prevOut = alpha * (prevOut + x - prevIn);
+    out[i] = prevOut;
+    prevIn = x;
+  }
+  return out;
+}
+
+// Splits the decoded audio into an overall envelope ("main") plus
+// three real frequency bands pulled from that same audio — bass
+// (<~200Hz), treble (>~4kHz), and mid (the band between them). This
+// is what actually moves with the song, not a decorative animation:
+// quiet/bass-heavy sections genuinely show a taller bass layer,
+// vocal/bright sections show more in mid/treble.
+function computeWaveformBands(audioBuffer, barCount) {
+  const channel = audioBuffer.getChannelData(0);
+  const sampleRate = audioBuffer.sampleRate;
+
+  const bass = onePoleLowPass(channel, sampleRate, 200);
+  const treble = onePoleHighPass(channel, sampleRate, 4000);
+  const mid = onePoleHighPass(onePoleLowPass(channel, sampleRate, 4000), sampleRate, 200);
+
+  return {
+    main: extractPeaksFromChannel(channel, barCount),
+    bass: extractPeaksFromChannel(bass, barCount),
+    mid: extractPeaksFromChannel(mid, barCount),
+    treble: extractPeaksFromChannel(treble, barCount)
+  };
+}
+
 // Paints the bars. Cheap enough to call on every timeupdate tick —
 // it never recomputes peaks, only repaints already-known numbers.
-function drawWaveform(peaks) {
-  lastWaveformPeaks = peaks;
+function drawWaveform(data) {
+  lastWaveformPeaks = data;
 
   const canvas = document.getElementById("waveformCanvas");
   if (!canvas) return;
@@ -3977,55 +4055,105 @@ function drawWaveform(peaks) {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!peaks || !peaks.length) return;
+  const main = data && data.main;
+  if (!main || !main.length) return;
 
-  const percent =
-    audio.duration
-      ? (audio.currentTime / audio.duration) * 100
-      : 0;
+  // Faint frequency layers first (drawn — and so, visually, sitting
+  // — underneath the main line): real bass/mid/treble content from
+  // this song, each a translucent area anchored to the baseline,
+  // stacked shortest-and-dimmest (bass) to tallest-and-clearest
+  // (treble) so the main line still reads as the foreground.
+  const bandLayers = [
+    { points: data.bass, heightScale: 0.42, alpha: 0.10 },
+    { points: data.mid, heightScale: 0.56, alpha: 0.14 },
+    { points: data.treble, heightScale: 0.70, alpha: 0.20 }
+  ];
 
-  const barCount = peaks.length;
-  const gap = 1.5 * dpr;
-  const barWidth =
-    Math.max(1, (canvas.width - gap * (barCount - 1)) / barCount);
-  const activeBars = Math.round((percent / 100) * barCount);
-  const midY = canvas.height / 2;
-
-  for (let i = 0; i < barCount; i++) {
-    const amp = Math.max(0.06, peaks[i]);
-    const barHeight = amp * canvas.height;
-    const x = i * (barWidth + gap);
-
-    // Unplayed bars stay a neutral, colorless gray; once a bar has
-    // been played it switches to the song's own dominant cover
-    // color (waveformActiveColor, kept in sync with the player's
-    // glow — see updatePlayerDynamicColor()), falling back to plain
-    // white for covers with no extractable color.
-    ctx.fillStyle =
-      i < activeBars
-        ? waveformActiveColor
-        : "rgba(255,255,255,.16)";
-
-    drawRoundedBar(ctx, x, midY - barHeight / 2, barWidth, barHeight, barWidth / 2);
+  for (const layer of bandLayers) {
+    if (layer.points && layer.points.length) {
+      const path = buildWaveAreaPath(layer.points, canvas.width, canvas.height, layer.heightScale);
+      ctx.fillStyle = waveformBandColor(layer.alpha);
+      ctx.fill(path);
+    }
   }
+
+  drawWaveMainLine(ctx, main, canvas.width, canvas.height, dpr);
 }
 
-// Pill-shaped bar (fully rounded ends) instead of a hard-edged
-// rectangle — purely visual, same position/size math as before.
-function drawRoundedBar(ctx, x, y, width, height, radius) {
-  const r = Math.min(radius, width / 2, height / 2);
-  if (r <= 0) {
-    ctx.fillRect(x, y, width, height);
-    return;
+// Builds a smooth (quadratic-curve-through-points) filled area path
+// from `baseline` up to each point's height, used for both the
+// decorative band layers and the main line below.
+function buildWaveAreaPath(points, width, height, heightScale) {
+  const n = points.length;
+  const stepX = width / (n - 1 || 1);
+  const baseline = height;
+
+  const xAt = i => i * stepX;
+  const yAt = i => baseline - Math.max(0.03, points[i]) * height * heightScale;
+
+  const path = new Path2D();
+  path.moveTo(xAt(0), baseline);
+  path.lineTo(xAt(0), yAt(0));
+
+  for (let i = 1; i < n; i++) {
+    const midX = (xAt(i - 1) + xAt(i)) / 2;
+    const midY = (yAt(i - 1) + yAt(i)) / 2;
+    path.quadraticCurveTo(xAt(i - 1), yAt(i - 1), midX, midY);
   }
+  path.lineTo(xAt(n - 1), yAt(n - 1));
+  path.lineTo(xAt(n - 1), baseline);
+  path.closePath();
+
+  return path;
+}
+
+// The prominent top layer — the actual progress indicator. Split at
+// the current playhead position into the song's dominant cover
+// color (played, brightness-boosted for legibility — see
+// ensureWaveformLegibility()) and a neutral gray (not yet played),
+// same role the old bars served, just rendered as one continuous
+// chart line.
+const WAVE_MAIN_HEIGHT_SCALE = 0.88;
+
+function drawWaveMainLine(ctx, points, width, height, dpr) {
+  const path = buildWaveAreaPath(points, width, height, WAVE_MAIN_HEIGHT_SCALE);
+  const lineWidth = Math.max(1.5 * dpr, height * 0.012);
+
+  const percent = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+  const activeX = Math.max(0, Math.min(width, (percent / 100) * width));
+
+  ctx.save();
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + width, y, x + width, y + height, r);
-  ctx.arcTo(x + width, y + height, x, y + height, r);
-  ctx.arcTo(x, y + height, x, y, r);
-  ctx.arcTo(x, y, x + width, y, r);
-  ctx.closePath();
-  ctx.fill();
+  ctx.rect(0, 0, activeX, height);
+  ctx.clip();
+  ctx.fillStyle = waveformBandColor(0.28);
+  ctx.fill(path);
+  ctx.strokeStyle = waveformActiveColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = "round";
+  ctx.stroke(path);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(activeX, 0, width - activeX, height);
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,.05)";
+  ctx.strokeStyle = "rgba(255,255,255,.28)";
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = "round";
+  ctx.fill(path);
+  ctx.stroke(path);
+  ctx.restore();
+}
+
+// rgba string at an arbitrary alpha, built from the same
+// legibility-boosted cover color the main line's stroke uses — lets
+// the decorative band layers and the main line's own fill share one
+// consistent per-song tint.
+function waveformBandColor(alpha) {
+  const [r, g, b] = waveformActiveColorRGB;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // Called from the existing "timeupdate"/"input" handling — no new
@@ -4078,6 +4206,11 @@ let lastGlowCoverUrl = undefined;
 // per-song color, defaulting to plain white until a cover color has
 // been extracted (see applyPlayerGlow() / resetPlayerGlow()).
 let waveformActiveColor = "rgba(255,255,255,.92)";
+
+// Raw [r, g, b] twin of the above, kept in sync so the faint band
+// layers can be filled at their own (lower) alphas without
+// re-parsing the rgba string.
+let waveformActiveColorRGB = [255, 255, 255];
 
 function updatePlayerDynamicColor(song) {
   if (!song) return;
@@ -4181,17 +4314,88 @@ function extractDominantColor(img) {
     r = 178; g = 160; b = 219;
   }
 
+  const [wr, wg, wb] = ensureWaveformLegibility(r, g, b);
+
   return {
     glow: `rgba(${r}, ${g}, ${b}, .55)`,
     glowSoft: `rgba(${r}, ${g}, ${b}, .18)`,
-    wave: `rgba(${r}, ${g}, ${b}, .95)`
+    wave: `rgba(${wr}, ${wg}, ${wb}, .95)`,
+    waveRGB: [wr, wg, wb]
   };
+}
+
+// The waveform's played bars sit on the player's near-black
+// background, so a color straight off a dark/muddy cover (deep
+// navy album art, black-on-black artwork, etc.) can end up nearly
+// invisible against it. This nudges only that copy of the color —
+// lifting lightness and, if needed, saturation — just enough to
+// stay legible, while keeping the same hue so it still visibly
+// belongs to that cover. Bright covers pass through untouched.
+const WAVEFORM_MIN_LIGHTNESS = 0.42;
+const WAVEFORM_MIN_SATURATION = 0.35;
+
+function ensureWaveformLegibility(r, g, b) {
+  const [h, s, l] = rgbToHsl(r, g, b);
+
+  if (l >= WAVEFORM_MIN_LIGHTNESS && s >= WAVEFORM_MIN_SATURATION) {
+    return [r, g, b];
+  }
+
+  const boostedL = Math.max(l, WAVEFORM_MIN_LIGHTNESS);
+  const boostedS = Math.max(s, WAVEFORM_MIN_SATURATION);
+  return hslToRgb(h, boostedS, boostedL);
+}
+
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+
+  const d = max - min;
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  return [h, s, l];
+}
+
+function hslToRgb(h, s, l) {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return [v, v, v];
+  }
+
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+
+  return [
+    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    Math.round(hue2rgb(p, q, h) * 255),
+    Math.round(hue2rgb(p, q, h - 1 / 3) * 255)
+  ];
 }
 
 function applyPlayerGlow(colorPair) {
   document.documentElement.style.setProperty("--player-glow", colorPair.glow);
   document.documentElement.style.setProperty("--player-glow-soft", colorPair.glowSoft);
   waveformActiveColor = colorPair.wave || "rgba(255,255,255,.92)";
+  waveformActiveColorRGB = colorPair.waveRGB || [255, 255, 255];
   redrawWaveformProgress();
 }
 
@@ -4199,6 +4403,7 @@ function resetPlayerGlow() {
   document.documentElement.style.removeProperty("--player-glow");
   document.documentElement.style.removeProperty("--player-glow-soft");
   waveformActiveColor = "rgba(255,255,255,.92)";
+  waveformActiveColorRGB = [255, 255, 255];
   redrawWaveformProgress();
 }
 
