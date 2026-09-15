@@ -4322,11 +4322,71 @@ function loadLyrics(song) {
     });
 }
 
+// Strips the kind of noise that shows up in scraped/tagged titles but
+// never in LRCLIB's own records — "(Official Video)", "[Lyrics]",
+// "feat. X", "- Remastered 2011", trailing "HD"/"HQ", etc. Used only
+// for the fallback attempts below; the very first /get try always
+// uses the untouched title/artist in case they're already clean.
+function cleanLyricsQueryText(text) {
+  return text
+    .replace(/[([]\s*(official\s*)?(music\s*)?(video|audio|lyrics?|visualizer|hd|hq|remaster(ed)?(\s*\d{4})?)\s*[)\]]/gi, " ")
+    .replace(/\b(feat\.?|ft\.?|featuring)\s+[^-([]+/gi, " ")
+    .replace(/[-–—]\s*(official\s*)?(video|audio|lyrics?|remaster(ed)?(\s*\d{4})?)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+// Picks the best candidate from a /search results array: prefers
+// synced-lyrics entries, then the one closest to the known duration
+// (when we have one).
+function pickBestLyricsCandidate(results, duration) {
+  if (!Array.isArray(results) || !results.length) return null;
+
+  const withSync = results.filter(r => r.syncedLyrics);
+  const candidates = withSync.length ? withSync : results;
+
+  let best = candidates[0];
+  if (duration) {
+    let bestDiff = Infinity;
+    for (const candidate of candidates) {
+      const diff = Math.abs((candidate.duration || 0) - duration);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = candidate;
+      }
+    }
+  }
+  return best;
+}
+
+// Runs one /api/search call and returns the parsed best match, or
+// null if the request failed / came back empty. Shared by every
+// search-based tier in fetchLyricsFromLRCLIB() below.
+async function searchLRCLIBOnce(params, duration) {
+  try {
+    const res = await fetch(`${LYRICS_API}/search?${params.toString()}`);
+    if (!res.ok) return null;
+
+    const results = await res.json();
+    const best = pickBestLyricsCandidate(results, duration);
+    return best ? parseLyricsResponse(best) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // Queries LRCLIB by artist + track title (and duration, when known,
-// to disambiguate covers/remixes). Tries the exact-match endpoint
-// first, then falls back to search and picks the closest duration
-// match. Never fabricates a result — any failure/empty response
-// resolves to { lines: [], unavailable: true }.
+// to disambiguate covers/remixes). Never fabricates a result — any
+// failure resolves to { lines: [], unavailable: true }. Tries,
+// in order:
+//   1. /get with the raw title/artist (+duration) — exact match,
+//      fastest and most accurate when the tags are already clean.
+//   2. /search with the raw title/artist, field-specific.
+//   3. /search with cleaned title/artist (strips "(Official Video)",
+//      "feat. X", "- Remastered 2011", etc.), field-specific.
+//   4. /search with the cleaned text as a single "q" query — the
+//      same fuzzy, combined-field search the lrclib.net site itself
+//      uses, so anything findable there is findable here too.
 async function fetchLyricsFromLRCLIB(song) {
   const title = (song.title || "").trim();
   const artist = (song.artist || "").trim();
@@ -4335,14 +4395,14 @@ async function fetchLyricsFromLRCLIB(song) {
     return { lines: [], unavailable: true };
   }
 
+  const duration = song.duration ? Math.round(song.duration) : null;
+
+  // Tier 1: exact-match /get.
   const getParams = new URLSearchParams({
     track_name: title,
     artist_name: artist
   });
-
-  if (song.duration) {
-    getParams.set("duration", String(Math.round(song.duration)));
-  }
+  if (duration) getParams.set("duration", String(duration));
 
   try {
     const res = await fetch(`${LYRICS_API}/get?${getParams.toString()}`);
@@ -4352,42 +4412,40 @@ async function fetchLyricsFromLRCLIB(song) {
       if (parsed) return parsed;
     }
   } catch (_) {
-    // fall through to search
+    // fall through to search tiers
   }
 
-  try {
-    const searchParams = new URLSearchParams({
-      track_name: title,
-      artist_name: artist
-    });
+  // Tier 2: field-specific /search on the raw title/artist.
+  const rawResult = await searchLRCLIBOnce(
+    new URLSearchParams({ track_name: title, artist_name: artist }),
+    duration
+  );
+  if (rawResult) return rawResult;
 
-    const res = await fetch(`${LYRICS_API}/search?${searchParams.toString()}`);
-    if (!res.ok) return { lines: [], unavailable: true };
+  // Tier 3 & 4: only worth trying if cleaning actually changed
+  // something — otherwise they'd just repeat tier 2's query.
+  const cleanTitle = cleanLyricsQueryText(title);
+  const cleanArtist = cleanLyricsQueryText(artist);
 
-    const results = await res.json();
-    if (!Array.isArray(results) || !results.length) {
-      return { lines: [], unavailable: true };
-    }
-
-    const withSync = results.filter(r => r.syncedLyrics);
-    const candidates = withSync.length ? withSync : results;
-
-    let best = candidates[0];
-    if (song.duration) {
-      let bestDiff = Infinity;
-      for (const candidate of candidates) {
-        const diff = Math.abs((candidate.duration || 0) - song.duration);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = candidate;
-        }
-      }
-    }
-
-    return parseLyricsResponse(best) || { lines: [], unavailable: true };
-  } catch (_) {
-    return { lines: [], unavailable: true };
+  if (cleanTitle && cleanTitle !== title) {
+    const cleanedFieldResult = await searchLRCLIBOnce(
+      new URLSearchParams({
+        track_name: cleanTitle,
+        artist_name: cleanArtist || artist
+      }),
+      duration
+    );
+    if (cleanedFieldResult) return cleanedFieldResult;
   }
+
+  const qText = `${cleanArtist || artist} ${cleanTitle || title}`.trim();
+  const qResult = await searchLRCLIBOnce(
+    new URLSearchParams({ q: qText }),
+    duration
+  );
+  if (qResult) return qResult;
+
+  return { lines: [], unavailable: true };
 }
 
 // Turns one LRCLIB record into { lines, unavailable, instrumental? }.
