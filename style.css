@@ -341,12 +341,13 @@ main { width: 100%; }
   animation: eqBars 1.3s ease-in-out infinite;
 }
 
-/* Dragging a row in Up Next repaints on every pointermove already;
-   freezing the equalizer for that window removes one more thing
-   competing for paint time on slower devices. Purely cosmetic —
-   it just resumes from wherever it left off once the drag ends. */
-.queue-list.is-dragging .song-item.playing .song-cover::after {
-  animation-play-state: paused;
+/* Up Next: the equalizer overlay is switched off entirely in this
+   list (per request) — the row still gets the .playing background
+   wash and border, it just no longer animates on the cover. Left
+   untouched everywhere else .song-item.playing is used (library,
+   search, playlists, etc.). */
+.queue-list .song-item.playing .song-cover::after {
+  display: none;
 }
 
 @keyframes eqBars {
