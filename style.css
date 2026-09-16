@@ -1926,3 +1926,18 @@ input:focus-visible {
   outline: 2px solid rgba(255, 255, 255, .55);
   outline-offset: 2px;
 }
+
+/* Lyric Video standalone tab (see initLyricVideoStandalone() in
+   app.js) — only ever shown if that page fails to load a song. */
+.lv-standalone-error {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  background: #090909;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.6;
+}

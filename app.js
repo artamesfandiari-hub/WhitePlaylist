@@ -338,6 +338,16 @@ async function init() {
   setupSmartMix();
   setupSharePlaylist();
 
+  // Lyric Video's own tab, opened via tg.openLink() in
+  // openLyricVideoModal() — skips the normal full-app boot (song
+  // library, favorites, artists, albums, playlists, home insights)
+  // entirely and jumps straight to that one song's lyric video
+  // screen, since none of the rest of the app is shown here.
+  const launchParams = new URLSearchParams(window.location.search);
+  if (launchParams.get("lv") === "1") {
+    return initLyricVideoStandalone(launchParams);
+  }
+
   renderHomeGreeting();
 
   // Must run before the other loads below so referral attribution
@@ -357,6 +367,65 @@ async function init() {
 
   renderRecentSongs();
   renderHomeDashboard();
+}
+
+// Boots straight into the Lyric Video screen for a single song, for
+// the standalone tab openLyricVideoModal() opens via tg.openLink()
+// (see buildLyricVideoStandaloneUrl()). Runs outside Telegram's
+// in-app browser entirely, so tg/tg.initDataUnsafe are not relied on
+// here — state.userId comes from the uid query param instead, and
+// every API call already authenticates the same way the Mini App's
+// own calls do (X-Telegram-User-Id).
+async function initLyricVideoStandalone(params) {
+  document.body.classList.add("lv-standalone");
+
+  const uid = params.get("uid");
+  if (uid) state.userId = uid;
+
+  const songId = Number(params.get("songId"));
+
+  if (!state.userId || !songId) {
+    showLyricVideoStandaloneError("Missing song info — go back and try again from the app.");
+    return;
+  }
+
+  try {
+    const data = await api("/songs?limit=500");
+    const songs = data.songs || [];
+    const song = songs.find(item => Number(item.id) === songId);
+
+    if (!song) {
+      showLyricVideoStandaloneError("Couldn't find that song.");
+      return;
+    }
+
+    state.songs = songs;
+    state.currentSong = song;
+
+    audio.crossOrigin = "anonymous";
+    audio.src = `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+    audio.load();
+
+    await new Promise(resolve => loadLyrics(song, resolve));
+
+    if (!lyricVideoHasUsableLyrics()) {
+      showLyricVideoStandaloneError("No synced lyrics for this song.");
+      return;
+    }
+
+    openLyricVideoModalInline();
+  } catch (error) {
+    console.error("Lyric video standalone:", error);
+    showLyricVideoStandaloneError("Couldn't load this song. Check your connection and try again.");
+  }
+}
+
+function showLyricVideoStandaloneError(message) {
+  document.body.innerHTML = `
+    <div class="lv-standalone-error">
+      <p>${escapeHTML(message)}</p>
+    </div>
+  `;
 }
 
 /* =========================================================
@@ -4500,12 +4569,23 @@ function saveLyricsToStorage(songId, result) {
 // into the inline player lyrics ticker. Called whenever the full
 // player loads a song (see updatePlayerUI()), since the ticker is
 // always part of the player layout now — no panel to open.
-function loadLyrics(song) {
-  if (!song || song.id == null) return;
+// onLoaded (optional) fires once currentLyricsLines has actually been
+// populated — the cached/localStorage branches resolve it
+// synchronously, the network fetch resolves it once that settles.
+// Existing callers that don't need to know when loading finished can
+// keep calling loadLyrics(song) exactly as before.
+function loadLyrics(song, onLoaded) {
+  if (!song || song.id == null) {
+    onLoaded?.();
+    return;
+  }
 
   const token = ++lyricsRequestToken;
   const track = document.getElementById("playerLyricsTrack");
-  if (!track) return;
+  if (!track) {
+    onLoaded?.();
+    return;
+  }
 
   activeLyricsLineIndex = -1;
   currentLyricsLines = [];
@@ -4513,6 +4593,7 @@ function loadLyrics(song) {
   const cached = lyricsCache.get(song.id);
   if (cached) {
     buildLyricsList(cached);
+    onLoaded?.();
     return;
   }
 
@@ -4527,6 +4608,7 @@ function loadLyrics(song) {
   if (stored) {
     lyricsCache.set(song.id, stored);
     buildLyricsList(stored);
+    onLoaded?.();
     return;
   }
 
@@ -4540,6 +4622,7 @@ function loadLyrics(song) {
       saveLyricsToStorage(song.id, result);
 
       buildLyricsList(result);
+      onLoaded?.();
     })
     .catch(error => {
       console.error("Lyrics:", error);
@@ -4548,6 +4631,7 @@ function loadLyrics(song) {
       const result = { lines: [], unavailable: true };
       lyricsCache.set(song.id, result);
       buildLyricsList(result);
+      onLoaded?.();
     });
 }
 
@@ -5388,7 +5472,46 @@ function updateLyricVideoMenuVisibility(song) {
   );
 }
 
+// Builds the URL used to hand the Lyric Video feature off to
+// Telegram's system browser (see openLyricVideoModal() below) — same
+// page, but flagged so init() skips the normal full-app boot and goes
+// straight to this one song's lyric video screen (initLyricVideoStandalone()).
+// state.userId is carried over as a plain query param because the
+// destination page runs outside Telegram, so tg.initDataUnsafe won't
+// be populated there — every API call this app makes already trusts
+// this same value via the X-Telegram-User-Id header (see api()),
+// so this isn't a weaker handoff than what the Mini App already does.
+function buildLyricVideoStandaloneUrl(songId) {
+  const url = new URL(window.location.href.split("?")[0]);
+  url.searchParams.set("lv", "1");
+  url.searchParams.set("songId", String(songId));
+  if (state.userId) url.searchParams.set("uid", state.userId);
+  return url.toString();
+}
+
 function openLyricVideoModal() {
+  if (!state.currentSong || !lyricVideoHasUsableLyrics()) return;
+
+  // The live preview here runs a real-time canvas animation loop plus
+  // a live Web Audio graph off the actual <audio> element — together
+  // still meaningfully heavier than Telegram's embedded in-app
+  // browser wants to carry on top of everything else the Mini App is
+  // already doing. Telegram's system browser (a real, full Chrome /
+  // Safari instance, opened via tg.openLink) has no such limits, so
+  // whenever we're actually running inside Telegram, hand off to that
+  // instead of opening this in-place. openLyricVideoModalInline()
+  // below is what runs once we get there (see initLyricVideoStandalone()).
+  if (tg && typeof tg.openLink === "function") {
+    tg.openLink(buildLyricVideoStandaloneUrl(state.currentSong.id), {
+      try_instant_view: false
+    });
+    return;
+  }
+
+  openLyricVideoModalInline();
+}
+
+function openLyricVideoModalInline() {
   if (!state.currentSong || !lyricVideoHasUsableLyrics()) return;
 
   lyricVideoSelection = { start: null, end: null };
@@ -5788,26 +5911,55 @@ function drawLyricVideoVisualizer(ctx, w, topY, bandHeight) {
   }
 }
 
-function drawLyricVideoPreview() {
-  const canvas = document.getElementById("lyricVideoCanvas");
-  const empty = document.getElementById("lyricVideoPreviewEmpty");
-  if (!canvas) return;
+// --- Perf caches for drawLyricVideoPreview() ---
+// Everything in this modal used to be rebuilt from scratch on every
+// single requestAnimationFrame (60x/sec): a 28px canvas blur over the
+// full 720x1280 background, plus fitLyricVideoFontSize() re-running
+// buildLyricVideoLayout() — itself doing a fresh ctx.measureText() per
+// word — up to 18 times just to pick a font size. None of that
+// actually depends on time; only the visualizer bars and the karaoke
+// word colors do. Doing it all every frame pegs the main thread,
+// which is what was making lyric line taps stop registering and (by
+// starving the audio pipeline of a responsive main thread) was also
+// the source of the audio glitching. Now the background + layout are
+// computed once and reused until something that actually changes them
+// (cover image, selection, canvas size) changes.
+let lyricVideoBgCanvas = null;
+let lyricVideoBgKey = null;
 
-  const { start, end } = lyricVideoSelection;
+let lyricVideoLayoutCache = { key: null, fontSize: 26, rows: [] };
 
-  if (start === null || end === null) {
-    clearLyricVideoPreview();
-    return;
+function getLyricVideoBackground(w, h) {
+  const song = state.currentSong;
+  const key = [
+    lyricVideoCoverImg ? lyricVideoCoverSongId : "none",
+    w,
+    h,
+    song?.title || "",
+    song?.artist || ""
+  ].join("|");
+
+  if (lyricVideoBgCanvas && lyricVideoBgKey === key) {
+    return lyricVideoBgCanvas;
   }
 
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
+  const bg =
+    lyricVideoBgCanvas && lyricVideoBgCanvas.width === w && lyricVideoBgCanvas.height === h
+      ? lyricVideoBgCanvas
+      : (typeof OffscreenCanvas !== "undefined"
+          ? new OffscreenCanvas(w, h)
+          : Object.assign(document.createElement("canvas"), { width: w, height: h }));
 
+  bg.width = w;
+  bg.height = h;
+
+  const ctx = bg.getContext("2d");
   ctx.clearRect(0, 0, w, h);
 
   // Background: blurred, cover-fit cropped cover art, or a plain
   // dark gradient fallback when no cover is available/loaded yet.
+  // The blur filter is expensive, so (unlike before) it now only
+  // runs when this cached layer is rebuilt, not on every frame.
   if (lyricVideoCoverImg) {
     ctx.save();
     ctx.filter = "blur(28px) brightness(.55)";
@@ -5843,25 +5995,8 @@ function drawLyricVideoPreview() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, w, h);
 
-  // Audio-reactive visualizer strip, safely above where the lyric
-  // block ever reaches.
-  drawLyricVideoVisualizer(ctx, w, h * .07, h * .09);
-
-  // Lyric text — karaoke-highlighted, wrapped per original line.
-  const padding = w * .1;
-  const maxWidth = w - padding * 2;
-  const maxHeight = h * .4;
-
-  const fontSize = fitLyricVideoFontSize(ctx, maxWidth, maxHeight, 26, 60);
-  const rows = buildLyricVideoLayout(ctx, fontSize, maxWidth);
-  const lineHeight = fontSize * 1.32;
-  const blockHeight = rows.length * lineHeight;
-  const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
-
-  drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
-
-  // Footer branding: song title + artist.
-  const song = state.currentSong;
+  // Footer branding: song title + artist. Static per song, so it's
+  // baked into the cached layer too instead of being redrawn per frame.
   if (song) {
     const titleDir = RTL_TEXT_RE.test(song.title || "") ? "rtl" : "ltr";
     const artistDir = RTL_TEXT_RE.test(song.artist || "") ? "rtl" : "ltr";
@@ -5880,6 +6015,63 @@ function drawLyricVideoPreview() {
     ctx.fillStyle = "rgba(255,255,255,.72)";
     ctx.fillText(song.artist || "", w / 2, h - 60);
   }
+
+  lyricVideoBgCanvas = bg;
+  lyricVideoBgKey = key;
+  return bg;
+}
+
+function getLyricVideoLayout(ctx, maxWidth, maxHeight) {
+  const { start, end } = lyricVideoSelection;
+  const key = `${start}|${end}|${maxWidth}|${maxHeight}`;
+
+  if (lyricVideoLayoutCache.key === key) {
+    return lyricVideoLayoutCache;
+  }
+
+  const fontSize = fitLyricVideoFontSize(ctx, maxWidth, maxHeight, 26, 60);
+  const rows = buildLyricVideoLayout(ctx, fontSize, maxWidth);
+
+  lyricVideoLayoutCache = { key, fontSize, rows };
+  return lyricVideoLayoutCache;
+}
+
+function drawLyricVideoPreview() {
+  const canvas = document.getElementById("lyricVideoCanvas");
+  const empty = document.getElementById("lyricVideoPreviewEmpty");
+  if (!canvas) return;
+
+  const { start, end } = lyricVideoSelection;
+
+  if (start === null || end === null) {
+    clearLyricVideoPreview();
+    return;
+  }
+
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(getLyricVideoBackground(w, h), 0, 0);
+
+  // Audio-reactive visualizer strip, safely above where the lyric
+  // block ever reaches.
+  drawLyricVideoVisualizer(ctx, w, h * .07, h * .09);
+
+  // Lyric text — karaoke-highlighted, wrapped per original line.
+  // Layout (font size, wrapping) is cached; only word colors change
+  // per frame, driven by audio.currentTime.
+  const padding = w * .1;
+  const maxWidth = w - padding * 2;
+  const maxHeight = h * .4;
+
+  const { fontSize, rows } = getLyricVideoLayout(ctx, maxWidth, maxHeight);
+  const lineHeight = fontSize * 1.32;
+  const blockHeight = rows.length * lineHeight;
+  const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
+
+  drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
 
   empty?.classList.add("hidden");
 }
@@ -5909,7 +6101,14 @@ function ensureLyricVideoAudioGraph() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return false;
 
-    lyricVideoAudioCtx = new Ctx();
+    // latencyHint: "playback" tells the browser to favor a stable,
+    // glitch-free buffer over low latency — this graph only ever
+    // feeds a visualizer/recording, never anything the user needs to
+    // react to in real time, so there's no reason to ask for the
+    // small, easy-to-underrun buffers "interactive" (the default)
+    // would use. Smaller buffers were part of what made playback
+    // crackle once this graph was live.
+    lyricVideoAudioCtx = new Ctx({ latencyHint: "playback" });
 
     // audio's crossorigin="anonymous" (index.html) plus the API's
     // existing CORS headers (already relied on for the cover-image
@@ -5934,11 +6133,23 @@ function ensureLyricVideoAudioGraph() {
 
 let lyricVideoAnimationFrame = null;
 
+// Now that drawLyricVideoPreview() reuses cached background/layout
+// (see getLyricVideoBackground()/getLyricVideoLayout() above), a full
+// 60fps loop is no longer needed — the visualizer bars and karaoke
+// coloring read fine at ~30fps, and capping it here leaves more main
+// thread headroom for taps on the lyric line list and for audio.
+const LYRIC_VIDEO_FRAME_INTERVAL_MS = 1000 / 30;
+
 function startLyricVideoAnimation() {
   stopLyricVideoAnimation();
 
-  const loop = () => {
-    drawLyricVideoPreview();
+  let lastT = 0;
+
+  const loop = t => {
+    if (t - lastT >= LYRIC_VIDEO_FRAME_INTERVAL_MS) {
+      lastT = t;
+      drawLyricVideoPreview();
+    }
     lyricVideoAnimationFrame = requestAnimationFrame(loop);
   };
 
