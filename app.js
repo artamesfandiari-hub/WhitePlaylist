@@ -1300,6 +1300,8 @@ function openSongActionsMenu(song, context = {}) {
     );
   }
 
+  updateLyricVideoMenuVisibility(song);
+
   modal.classList.remove("hidden");
 }
 
@@ -2348,6 +2350,28 @@ function setupModals() {
         "Delete all songs from your library? This cannot be undone and will remove them from playlists and favorites too.",
         () => deleteAllSongs()
       );
+    });
+
+  document
+    .getElementById("songActionLyricVideo")
+    ?.addEventListener("click", () => {
+      closeSongActionsMenu();
+      openLyricVideoModal();
+    });
+
+  document
+    .getElementById("closeLyricVideoModal")
+    ?.addEventListener("click", closeLyricVideoModal);
+
+  document
+    .getElementById("lyricVideoSendButton")
+    ?.addEventListener("click", startLyricVideoRecording);
+
+  document
+    .getElementById("lyricVideoModeToggle")
+    ?.addEventListener("click", event => {
+      const btn = event.target.closest(".lyric-video-mode-btn");
+      if (btn) setLyricVideoMode(btn.dataset.mode);
     });
 }
 
@@ -5312,6 +5336,893 @@ function updateLyricsSync() {
   if (index !== activeLyricsLineIndex) {
     activeLyricsLineIndex = index;
     renderLyricsLine(index);
+  }
+}
+
+/* =========================================================
+   LYRIC VIDEO (Stage 1: range picker + static story-frame
+   preview only — no animation, audio capture, or sending yet).
+   ----------------------------------------------------------------
+   Reuses currentLyricsLines (from parseLRC() via buildLyricsList())
+   for the selectable lines, and RTL_TEXT_RE for text direction, so
+   this stays in sync with whatever lyrics are actually loaded for
+   the current song instead of keeping its own copy.
+   ========================================================= */
+
+// { start, end } line indices into currentLyricsLines, both null
+// until the user has tapped at least one line. start/end are always
+// kept in low/high order regardless of tap order — see
+// handleLyricVideoLineTap().
+let lyricVideoSelection = { start: null, end: null };
+
+// Which marker the next line tap moves — toggled by the
+// Set Start / Set End segmented control (#lyricVideoModeToggle).
+let lyricVideoMode = "start";
+
+// Cover image for the song the modal was opened for, reloaded (once)
+// whenever the modal opens so the preview never draws a stale cover
+// from a previously previewed song.
+let lyricVideoCoverImg = null;
+let lyricVideoCoverSongId = null;
+
+function lyricVideoHasUsableLyrics() {
+  return currentLyricsLines.length > 0;
+}
+
+// Toggles the ⋯ menu's "Make Lyric Video" entry — only ever shown
+// when the song the menu was opened for is both the song currently
+// loaded in the player (lyrics are only tracked for that one song)
+// and has synced lyrics available.
+function updateLyricVideoMenuVisibility(song) {
+  const btn = document.getElementById("songActionLyricVideo");
+  if (!btn) return;
+
+  const isCurrentSong =
+    song &&
+    state.currentSong &&
+    Number(song.id) === Number(state.currentSong.id);
+
+  btn.classList.toggle(
+    "hidden",
+    !(isCurrentSong && lyricVideoHasUsableLyrics())
+  );
+}
+
+function openLyricVideoModal() {
+  if (!state.currentSong || !lyricVideoHasUsableLyrics()) return;
+
+  lyricVideoSelection = { start: null, end: null };
+  lyricVideoMode = "start";
+
+  updateLyricVideoModeUI();
+  renderLyricVideoLinesList();
+  clearLyricVideoPreview();
+  loadLyricVideoCoverImage(state.currentSong);
+  setLyricVideoSendStatus("idle");
+
+  document
+    .getElementById("lyricVideoModal")
+    ?.classList.remove("hidden");
+
+  // Poppins/Vazirmatn load async (see the Google Fonts <link> in
+  // index.html) — on a rare cold cache the very first draw could
+  // measure text against the fallback font before they finish. One
+  // redraw once document.fonts settles fixes that without adding any
+  // visible delay in the common case where they're already loaded.
+  document.fonts?.ready?.then(() => drawLyricVideoPreview());
+
+  // Setting up the live audio graph (see ensureLyricVideoAudioGraph())
+  // must happen from a real user gesture — this click is one — and
+  // only ever once per page load. The animation loop runs the whole
+  // time the modal is open regardless of whether the graph came up,
+  // since drawLyricVideoPreview()/drawLyricVideoVisualizer() already
+  // no-op the bars gracefully when there's no analyser yet.
+  ensureLyricVideoAudioGraph();
+  lyricVideoAudioCtx?.resume().catch(() => {});
+  startLyricVideoAnimation();
+}
+
+function closeLyricVideoModal() {
+  if (lyricVideoSendStatus === "recording") {
+    cancelLyricVideoRecording();
+  }
+
+  stopLyricVideoAnimation();
+
+  document
+    .getElementById("lyricVideoModal")
+    ?.classList.add("hidden");
+}
+
+function setLyricVideoMode(mode) {
+  if (lyricVideoSendStatus === "recording" || lyricVideoSendStatus === "uploading") return;
+  lyricVideoMode = mode;
+  updateLyricVideoModeUI();
+}
+
+function updateLyricVideoModeUI() {
+  document
+    .getElementById("lyricVideoModeStart")
+    ?.classList.toggle("active", lyricVideoMode === "start");
+
+  document
+    .getElementById("lyricVideoModeEnd")
+    ?.classList.toggle("active", lyricVideoMode === "end");
+}
+
+function renderLyricVideoLinesList() {
+  const list = document.getElementById("lyricVideoLinesList");
+  if (!list) return;
+
+  if (!currentLyricsLines.length) {
+    list.innerHTML = `<div class="empty">No synced lyrics for this song.</div>`;
+    return;
+  }
+
+  list.innerHTML = currentLyricsLines
+    .map((line, index) => {
+      const text = (line.text || "").trim() || "…";
+      const dir = RTL_TEXT_RE.test(text) ? "rtl" : "ltr";
+
+      return `
+        <button
+          type="button"
+          class="lyric-video-line"
+          dir="${dir}"
+          data-index="${index}"
+        >
+          <span>${escapeHTML(text)}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  list.querySelectorAll(".lyric-video-line").forEach(el => {
+    el.addEventListener("click", () => {
+      handleLyricVideoLineTap(Number(el.dataset.index));
+    });
+  });
+
+  updateLyricVideoLinesUI();
+}
+
+function handleLyricVideoLineTap(index) {
+  if (lyricVideoSendStatus === "recording" || lyricVideoSendStatus === "uploading") return;
+
+  if (lyricVideoMode === "start") {
+    const end =
+      lyricVideoSelection.end === null
+        ? index
+        : Math.max(index, lyricVideoSelection.end);
+
+    lyricVideoSelection = { start: Math.min(index, end), end };
+
+    // Once a start is placed on a fresh (single-line) selection, the
+    // natural next tap is the end line, so auto-advance the mode —
+    // but only for that first tap. Re-tapping Start later to adjust
+    // an already two-line range shouldn't keep bouncing back to End.
+    if (lyricVideoSelection.start === lyricVideoSelection.end) {
+      setLyricVideoMode("end");
+    }
+  } else {
+    const start =
+      lyricVideoSelection.start === null
+        ? index
+        : Math.min(index, lyricVideoSelection.start);
+
+    lyricVideoSelection = { start, end: Math.max(index, start) };
+  }
+
+  updateLyricVideoLinesUI();
+  drawLyricVideoPreview();
+  updateLyricVideoSendButtonEnabled();
+}
+
+function updateLyricVideoLinesUI() {
+  const { start, end } = lyricVideoSelection;
+
+  document
+    .querySelectorAll("#lyricVideoLinesList .lyric-video-line")
+    .forEach(el => {
+      const index = Number(el.dataset.index);
+
+      const inRange =
+        start !== null && end !== null && index >= start && index <= end;
+
+      const isEdge = index === start || index === end;
+
+      el.classList.toggle("in-range", inRange);
+      el.classList.toggle("is-edge", start !== null && isEdge);
+
+      const existingMarker = el.querySelector(".lyric-video-line-marker");
+      if (existingMarker) existingMarker.remove();
+
+      if (start !== null && index === start) {
+        el.insertAdjacentHTML(
+          "beforeend",
+          `<span class="lyric-video-line-marker">START</span>`
+        );
+      } else if (end !== null && index === end && end !== start) {
+        el.insertAdjacentHTML(
+          "beforeend",
+          `<span class="lyric-video-line-marker">END</span>`
+        );
+      }
+    });
+}
+
+function loadLyricVideoCoverImage(song) {
+  const coverUrl = song.cover_url ? resolveCoverUrl(song.cover_url) : null;
+
+  if (!coverUrl) {
+    lyricVideoCoverImg = null;
+    lyricVideoCoverSongId = song.id;
+    drawLyricVideoPreview();
+    return;
+  }
+
+  if (lyricVideoCoverSongId === song.id && lyricVideoCoverImg) {
+    drawLyricVideoPreview();
+    return;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+
+  img.onload = () => {
+    // Modal may have been reopened for a different song while this
+    // was loading — a stale image would draw the wrong cover.
+    if (!state.currentSong || state.currentSong.id !== song.id) return;
+
+    lyricVideoCoverImg = img;
+    lyricVideoCoverSongId = song.id;
+    drawLyricVideoPreview();
+  };
+
+  img.onerror = () => {
+    lyricVideoCoverImg = null;
+    lyricVideoCoverSongId = song.id;
+    drawLyricVideoPreview();
+  };
+
+  img.src = coverUrl;
+}
+
+function clearLyricVideoPreview() {
+  const canvas = document.getElementById("lyricVideoCanvas");
+  const empty = document.getElementById("lyricVideoPreviewEmpty");
+
+  if (canvas) {
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  empty?.classList.remove("hidden");
+}
+
+// Same Poppins/Vazirmatn split the live lyrics ticker uses (see
+// .player-lyrics-track / .player-lyrics-track[dir="rtl"] in
+// style.css) — kept in sync here so the exported frame reads exactly
+// like the in-app lyrics.
+function lyricVideoFontFamily(dir) {
+  return dir === "rtl"
+    ? `"Vazirmatn", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`
+    : `"Poppins", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
+}
+
+// How long the very last word/line of the selection stays lit after
+// its own timestamp, since (unlike every earlier word) it has no
+// "next word" to mark where its highlight should end.
+const LYRIC_VIDEO_TAIL_SECONDS = 2.2;
+
+// Builds the karaoke tokens for one lyric line. When enhanced LRC
+// gave this line per-word timing (line.words), each word is its own
+// token so it lights up individually. Otherwise every plain word in
+// the line becomes a token sharing the *same* [line.time, nextTime)
+// window, so wrapping still works but the whole line highlights as
+// one unit — the line-level fallback promised for non-enhanced LRC.
+function buildLyricVideoLineTokens(line, nextTime) {
+  if (line.words && line.words.length) {
+    return line.words.map((word, i) => ({
+      text: word.text,
+      start: word.time,
+      end: line.words[i + 1] ? line.words[i + 1].time : nextTime
+    }));
+  }
+
+  return (line.text || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(text => ({ text, start: line.time, end: nextTime }));
+}
+
+// Greedy-wraps already-built tokens (see buildLyricVideoLineTokens)
+// to `maxWidth` at whatever font is currently set on `ctx`, same
+// idea as a plain text word-wrap but keeping each token's own
+// start/end so per-token coloring survives the wrap.
+function wrapLyricVideoTokens(ctx, tokens, maxWidth) {
+  const rows = [];
+  let current = [];
+  let currentWidth = 0;
+
+  for (const token of tokens) {
+    const width = ctx.measureText(`${token.text} `).width;
+
+    if (current.length && currentWidth + width > maxWidth) {
+      rows.push({ tokens: current, width: currentWidth });
+      current = [];
+      currentWidth = 0;
+    }
+
+    current.push({ ...token, width });
+    currentWidth += width;
+  }
+
+  if (current.length) rows.push({ tokens: current, width: currentWidth });
+  return rows;
+}
+
+// Lays out the whole selected range at `fontSize`: one or more
+// wrapped rows per original lyric line (lines are never merged into
+// each other's wrap, so a short second line never runs on to the
+// end of a long first line). Each row also carries its own text
+// direction, since a mixed-language selection is possible.
+function buildLyricVideoLayout(ctx, fontSize, maxWidth) {
+  const { start, end } = lyricVideoSelection;
+  if (start === null || end === null) return [];
+
+  const rows = [];
+
+  for (let i = start; i <= end; i++) {
+    const line = currentLyricsLines[i];
+    const nextTime =
+      i < end
+        ? currentLyricsLines[i + 1].time
+        : line.time + LYRIC_VIDEO_TAIL_SECONDS;
+
+    const dir = RTL_TEXT_RE.test(line.text || "") ? "rtl" : "ltr";
+    ctx.font = `800 ${fontSize}px ${lyricVideoFontFamily(dir)}`;
+
+    const tokens = buildLyricVideoLineTokens(line, nextTime);
+    wrapLyricVideoTokens(ctx, tokens, maxWidth).forEach(row => {
+      rows.push({ ...row, dir });
+    });
+  }
+
+  return rows;
+}
+
+// Largest font size (within [min, max]) whose buildLyricVideoLayout()
+// row count still fits maxHeight, using canvas's own measureText
+// rather than DOM layout — this canvas is never mounted in the page,
+// so the DOM-based measureLyricsFontSize() the live ticker uses
+// doesn't apply here.
+function fitLyricVideoFontSize(ctx, maxWidth, maxHeight, min, max) {
+  let best = min;
+
+  for (let size = max; size >= min; size -= 2) {
+    const rows = buildLyricVideoLayout(ctx, size, maxWidth);
+    const totalHeight = rows.length * (size * 1.32);
+
+    if (totalHeight <= maxHeight) {
+      best = size;
+      break;
+    }
+  }
+
+  return best;
+}
+
+function drawLyricVideoLyricRows(ctx, rows, fontSize, centerX, startY) {
+  const lineHeight = fontSize * 1.32;
+  const t = audio.currentTime;
+
+  rows.forEach((row, rowIndex) => {
+    const y = startY + rowIndex * lineHeight;
+    ctx.font = `800 ${fontSize}px ${lyricVideoFontFamily(row.dir)}`;
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,.55)";
+    ctx.shadowBlur = 18;
+
+    if (row.dir === "rtl") {
+      ctx.textAlign = "right";
+      let cursor = centerX + row.width / 2;
+
+      row.tokens.forEach(token => {
+        ctx.fillStyle = lyricVideoTokenColor(token, t);
+        ctx.fillText(`${token.text} `, cursor, y);
+        cursor -= token.width;
+      });
+    } else {
+      ctx.textAlign = "left";
+      let cursor = centerX - row.width / 2;
+
+      row.tokens.forEach(token => {
+        ctx.fillStyle = lyricVideoTokenColor(token, t);
+        ctx.fillText(`${token.text} `, cursor, y);
+        cursor += token.width;
+      });
+    }
+  });
+
+  ctx.shadowBlur = 0;
+}
+
+// Sung → full white, currently-active word → the app's lavender
+// accent (--accent-glow: rgba(178,160,219,.55) in style.css, used at
+// full strength here), upcoming → dimmed white. Same three-state
+// progression as Spotify/Apple Music-style karaoke captions.
+function lyricVideoTokenColor(token, currentTime) {
+  if (currentTime >= token.end) return "rgba(255,255,255,1)";
+  if (currentTime >= token.start) return "rgb(178,160,219)";
+  return "rgba(255,255,255,.42)";
+}
+
+// Draws a symmetric, mirrored bar visualizer driven by the live
+// AnalyserNode (see ensureLyricVideoAudioGraph()) — real frequency
+// data from whatever's actually playing, not a decorative fixed
+// loop. Only the lower ~60% of the spectrum is sampled since that's
+// where music's energy actually lives; sampling the full range makes
+// a visualizer that's almost always flat.
+function drawLyricVideoVisualizer(ctx, w, topY, bandHeight) {
+  if (!lyricVideoAnalyser || !lyricVideoFreqData) return;
+
+  lyricVideoAnalyser.getByteFrequencyData(lyricVideoFreqData);
+
+  const barCount = 40;
+  const usableBins = Math.floor(lyricVideoFreqData.length * .6);
+  const areaWidth = w * .86;
+  const gap = 4;
+  const barWidth = (areaWidth - gap * (barCount - 1)) / barCount;
+  const startX = (w - areaWidth) / 2;
+  const midY = topY + bandHeight / 2;
+
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+
+  for (let i = 0; i < barCount; i++) {
+    const binIndex = Math.floor((i / barCount) * usableBins);
+    const value = lyricVideoFreqData[binIndex] / 255;
+    const barHeight = Math.max(3, value * bandHeight);
+
+    const x = startX + i * (barWidth + gap);
+    ctx.fillRect(x, midY - barHeight / 2, barWidth, barHeight);
+  }
+}
+
+function drawLyricVideoPreview() {
+  const canvas = document.getElementById("lyricVideoCanvas");
+  const empty = document.getElementById("lyricVideoPreviewEmpty");
+  if (!canvas) return;
+
+  const { start, end } = lyricVideoSelection;
+
+  if (start === null || end === null) {
+    clearLyricVideoPreview();
+    return;
+  }
+
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Background: blurred, cover-fit cropped cover art, or a plain
+  // dark gradient fallback when no cover is available/loaded yet.
+  if (lyricVideoCoverImg) {
+    ctx.save();
+    ctx.filter = "blur(28px) brightness(.55)";
+
+    const scale = Math.max(
+      w / lyricVideoCoverImg.width,
+      h / lyricVideoCoverImg.height
+    ) * 1.15; // slight overscan so the blur never shows a hard edge
+
+    const dw = lyricVideoCoverImg.width * scale;
+    const dh = lyricVideoCoverImg.height * scale;
+
+    ctx.drawImage(
+      lyricVideoCoverImg,
+      (w - dw) / 2,
+      (h - dh) / 2,
+      dw,
+      dh
+    );
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "#141118";
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Top/bottom gradient so the visualizer, lyric text, and footer
+  // all stay legible over any cover.
+  const gradient = ctx.createLinearGradient(0, 0, 0, h);
+  gradient.addColorStop(0, "rgba(0,0,0,.45)");
+  gradient.addColorStop(.3, "rgba(0,0,0,.15)");
+  gradient.addColorStop(.75, "rgba(0,0,0,.55)");
+  gradient.addColorStop(1, "rgba(0,0,0,.8)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, w, h);
+
+  // Audio-reactive visualizer strip, safely above where the lyric
+  // block ever reaches.
+  drawLyricVideoVisualizer(ctx, w, h * .07, h * .09);
+
+  // Lyric text — karaoke-highlighted, wrapped per original line.
+  const padding = w * .1;
+  const maxWidth = w - padding * 2;
+  const maxHeight = h * .4;
+
+  const fontSize = fitLyricVideoFontSize(ctx, maxWidth, maxHeight, 26, 60);
+  const rows = buildLyricVideoLayout(ctx, fontSize, maxWidth);
+  const lineHeight = fontSize * 1.32;
+  const blockHeight = rows.length * lineHeight;
+  const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
+
+  drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
+
+  // Footer branding: song title + artist.
+  const song = state.currentSong;
+  if (song) {
+    const titleDir = RTL_TEXT_RE.test(song.title || "") ? "rtl" : "ltr";
+    const artistDir = RTL_TEXT_RE.test(song.artist || "") ? "rtl" : "ltr";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowBlur = 0;
+
+    ctx.direction = titleDir;
+    ctx.font = `800 26px ${lyricVideoFontFamily(titleDir)}`;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(song.title || "", w / 2, h - 96);
+
+    ctx.direction = artistDir;
+    ctx.font = `600 20px ${lyricVideoFontFamily(artistDir)}`;
+    ctx.fillStyle = "rgba(255,255,255,.72)";
+    ctx.fillText(song.artist || "", w / 2, h - 60);
+  }
+
+  empty?.classList.add("hidden");
+}
+
+/* --- Live audio graph + animation loop ---
+   The waveform feature above decodes a *separate* fetched copy of
+   each song, deliberately never touching the actual <audio> element
+   — because a media element can only ever be handed to
+   createMediaElementSource() ONCE in its whole lifetime (a hard
+   platform restriction, not a bug), and doing so permanently reroutes
+   its output through the Web Audio graph. That's fine (and is
+   exactly what the visualizer needs: real frequency data from what's
+   actually playing) as long as it's done exactly once, ever, and the
+   analyser stays connected through to destination — otherwise
+   playback would go silent everywhere in the app, not just here. */
+
+let lyricVideoAudioCtx = null;
+let lyricVideoAnalyser = null;
+let lyricVideoFreqData = null;
+let lyricVideoAudioGraphReady = false;
+let lyricVideoSourceNode = null;
+
+function ensureLyricVideoAudioGraph() {
+  if (lyricVideoAudioGraphReady) return true;
+
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return false;
+
+    lyricVideoAudioCtx = new Ctx();
+
+    // audio's crossorigin="anonymous" (index.html) plus the API's
+    // existing CORS headers (already relied on for the cover-image
+    // canvas reads elsewhere in this file) are what let this analyse
+    // the real audio data instead of silently reading zeros.
+    lyricVideoSourceNode = lyricVideoAudioCtx.createMediaElementSource(audio);
+    lyricVideoAnalyser = lyricVideoAudioCtx.createAnalyser();
+    lyricVideoAnalyser.fftSize = 256;
+    lyricVideoAnalyser.smoothingTimeConstant = .78;
+
+    lyricVideoSourceNode.connect(lyricVideoAnalyser);
+    lyricVideoAnalyser.connect(lyricVideoAudioCtx.destination);
+
+    lyricVideoFreqData = new Uint8Array(lyricVideoAnalyser.frequencyBinCount);
+    lyricVideoAudioGraphReady = true;
+    return true;
+  } catch (err) {
+    console.error("Lyric video audio graph:", err);
+    return false;
+  }
+}
+
+let lyricVideoAnimationFrame = null;
+
+function startLyricVideoAnimation() {
+  stopLyricVideoAnimation();
+
+  const loop = () => {
+    drawLyricVideoPreview();
+    lyricVideoAnimationFrame = requestAnimationFrame(loop);
+  };
+
+  lyricVideoAnimationFrame = requestAnimationFrame(loop);
+}
+
+function stopLyricVideoAnimation() {
+  if (lyricVideoAnimationFrame) {
+    cancelAnimationFrame(lyricVideoAnimationFrame);
+    lyricVideoAnimationFrame = null;
+  }
+}
+
+/* --- Recording (MediaRecorder) + sending to the chat ---
+   Captures exactly what's already being drawn/played — the same
+   canvas frames the live preview above draws, and the same <audio>
+   element's real playback — for the selected line range, then hands
+   the finished file to the Worker's /lyric-video endpoint, which
+   relays it to Telegram's sendVideo (see sendLyricVideo() in
+   worker.js). Nothing is re-rendered server-side; the clip Telegram
+   ends up sending is byte-for-byte what MediaRecorder produced here. */
+
+// A second, parallel tap off the same MediaElementAudioSourceNode
+// used for the analyser (lyricVideoSourceNode) — one node can feed
+// multiple destinations, so this doesn't disturb playback or the
+// visualizer. Created lazily, once, the first time a recording
+// actually starts.
+let lyricVideoStreamDest = null;
+
+let lyricVideoRecorder = null;
+let lyricVideoRecordChunks = [];
+let lyricVideoRecordStopTimer = null;
+let lyricVideoRecordMimeType = null;
+
+// { time, wasPlaying } snapshot of playback taken right before a
+// recording scrubs the audio to the clip's start, so it can be put
+// back exactly where the user left it once the recording is done —
+// recording a clip shouldn't leave their actual listening position
+// disturbed.
+let lyricVideoResumeState = null;
+
+// idle | recording | uploading | sent | error — drives both the
+// send button's label/disabled state and the status line under the
+// preview (see setLyricVideoSendStatus()).
+let lyricVideoSendStatus = "idle";
+
+function ensureLyricVideoStreamDestination() {
+  if (lyricVideoStreamDest) return lyricVideoStreamDest;
+  if (!lyricVideoAudioGraphReady || !lyricVideoSourceNode) return null;
+
+  lyricVideoStreamDest = lyricVideoAudioCtx.createMediaStreamDestination();
+  lyricVideoSourceNode.connect(lyricVideoStreamDest);
+  return lyricVideoStreamDest;
+}
+
+function pickLyricVideoMimeType() {
+  if (typeof MediaRecorder === "undefined") return null;
+
+  const candidates = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm"
+  ];
+
+  return candidates.find(type => MediaRecorder.isTypeSupported(type)) || null;
+}
+
+function updateLyricVideoSendButtonEnabled() {
+  const btn = document.getElementById("lyricVideoSendButton");
+  if (!btn) return;
+
+  const hasSelection =
+    lyricVideoSelection.start !== null && lyricVideoSelection.end !== null;
+
+  btn.disabled = !hasSelection || lyricVideoSendStatus === "recording" || lyricVideoSendStatus === "uploading";
+}
+
+function setLyricVideoSendStatus(nextStatus) {
+  lyricVideoSendStatus = nextStatus;
+
+  const btn = document.getElementById("lyricVideoSendButton");
+  const statusEl = document.getElementById("lyricVideoStatus");
+
+  const labels = {
+    idle: "Send to Chat",
+    recording: "Recording…",
+    uploading: "Sending…",
+    sent: "Sent ✓",
+    error: "Couldn't Send — Try Again"
+  };
+
+  const statusText = {
+    idle: "",
+    recording: "Recording the clip — leave this open…",
+    uploading: "Sending to your chat…",
+    sent: "Sent! Check your chat with the bot.",
+    error: "Something went wrong sending the video."
+  };
+
+  if (btn) btn.textContent = labels[nextStatus] || labels.idle;
+
+  if (statusEl) {
+    statusEl.textContent = statusText[nextStatus] || "";
+    statusEl.classList.toggle("is-error", nextStatus === "error");
+    statusEl.classList.toggle("is-sent", nextStatus === "sent");
+  }
+
+  updateLyricVideoSendButtonEnabled();
+}
+
+function startLyricVideoRecording() {
+  if (lyricVideoSendStatus === "recording" || lyricVideoSendStatus === "uploading") return;
+
+  const { start, end } = lyricVideoSelection;
+  if (start === null || end === null) return;
+
+  if (!ensureLyricVideoAudioGraph()) {
+    setLyricVideoSendStatus("error");
+    return;
+  }
+
+  const streamDest = ensureLyricVideoStreamDestination();
+  const mimeType = pickLyricVideoMimeType();
+  const canvas = document.getElementById("lyricVideoCanvas");
+
+  if (!streamDest || !mimeType || !canvas || typeof canvas.captureStream !== "function") {
+    setLyricVideoSendStatus("error");
+    return;
+  }
+
+  const firstLine = currentLyricsLines[start];
+  const lastLine = currentLyricsLines[end];
+  const recordStart = Math.max(0, firstLine.time - .2);
+  const recordEnd = lastLine.time + LYRIC_VIDEO_TAIL_SECONDS;
+  const durationMs = Math.max(500, (recordEnd - recordStart) * 1000);
+
+  lyricVideoResumeState = {
+    time: audio.currentTime,
+    wasPlaying: !audio.paused
+  };
+
+  const videoStream = canvas.captureStream(30);
+  const combined = new MediaStream([
+    ...videoStream.getVideoTracks(),
+    ...streamDest.stream.getAudioTracks()
+  ]);
+
+  lyricVideoRecordChunks = [];
+  lyricVideoRecordMimeType = mimeType;
+
+  let recorder;
+  try {
+    recorder = new MediaRecorder(combined, {
+      mimeType,
+      videoBitsPerSecond: 2_500_000
+    });
+  } catch (err) {
+    console.error("Lyric video recorder:", err);
+    setLyricVideoSendStatus("error");
+    return;
+  }
+
+  lyricVideoRecorder = recorder;
+
+  recorder.ondataavailable = event => {
+    if (event.data && event.data.size) lyricVideoRecordChunks.push(event.data);
+  };
+
+  recorder.onstop = () => {
+    clearTimeout(lyricVideoRecordStopTimer);
+    lyricVideoRecordStopTimer = null;
+
+    restoreLyricVideoPlaybackState();
+
+    const chunks = lyricVideoRecordChunks;
+    lyricVideoRecordChunks = [];
+
+    if (!chunks.length) {
+      setLyricVideoSendStatus("error");
+      return;
+    }
+
+    const blob = new Blob(chunks, { type: lyricVideoRecordMimeType });
+    uploadLyricVideo(blob);
+  };
+
+  recorder.onerror = event => {
+    console.error("Lyric video recorder error:", event.error);
+    restoreLyricVideoPlaybackState();
+    setLyricVideoSendStatus("error");
+  };
+
+  setLyricVideoSendStatus("recording");
+  audio.pause();
+
+  let seekHandled = false;
+
+  const beginCaptureAndPlay = () => {
+    if (seekHandled) return;
+    seekHandled = true;
+    audio.removeEventListener("seeked", beginCaptureAndPlay);
+
+    if (lyricVideoSendStatus !== "recording") return; // cancelled meanwhile
+
+    recorder.start();
+    audio.play().catch(err => console.error("Lyric video playback:", err));
+
+    lyricVideoRecordStopTimer = setTimeout(() => {
+      if (recorder.state !== "inactive") recorder.stop();
+    }, durationMs);
+  };
+
+  audio.addEventListener("seeked", beginCaptureAndPlay);
+  audio.currentTime = recordStart;
+
+  // Some browsers don't fire "seeked" for a very small time delta —
+  // a short fallback timer guarantees recording still starts either
+  // way, instead of silently hanging on "Recording…" forever.
+  setTimeout(beginCaptureAndPlay, 400);
+}
+
+function restoreLyricVideoPlaybackState() {
+  if (!lyricVideoResumeState) return;
+
+  audio.pause();
+  audio.currentTime = lyricVideoResumeState.time;
+  if (lyricVideoResumeState.wasPlaying) {
+    audio.play().catch(() => {});
+  }
+
+  lyricVideoResumeState = null;
+}
+
+// Stops an in-progress recording without sending anything — used
+// when the modal is closed mid-recording (see closeLyricVideoModal()).
+function cancelLyricVideoRecording() {
+  if (lyricVideoRecordStopTimer) {
+    clearTimeout(lyricVideoRecordStopTimer);
+    lyricVideoRecordStopTimer = null;
+  }
+
+  if (lyricVideoRecorder && lyricVideoRecorder.state !== "inactive") {
+    lyricVideoRecorder.onstop = null;
+    lyricVideoRecorder.onerror = null;
+    lyricVideoRecorder.stop();
+  }
+
+  lyricVideoRecordChunks = [];
+  restoreLyricVideoPlaybackState();
+  setLyricVideoSendStatus("idle");
+}
+
+async function uploadLyricVideo(blob) {
+  setLyricVideoSendStatus("uploading");
+
+  try {
+    const formData = new FormData();
+    formData.append("video", blob, "lyric-video.webm");
+    if (state.currentSong?.id != null) {
+      formData.append("song_id", state.currentSong.id);
+    }
+
+    const headers = {};
+    if (state.userId) headers["X-Telegram-User-Id"] = state.userId;
+
+    // A raw fetch (not the api() helper) — api() always sets
+    // Content-Type: application/json for any request with a body,
+    // which would break this multipart upload's boundary.
+    const response = await fetch(`${API}/lyric-video`, {
+      method: "POST",
+      headers,
+      body: formData
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data || !data.success) {
+      throw new Error((data && data.error) || `Upload failed (${response.status})`);
+    }
+
+    setLyricVideoSendStatus("sent");
+  } catch (err) {
+    console.error("Lyric video upload:", err);
+    setLyricVideoSendStatus("error");
   }
 }
 

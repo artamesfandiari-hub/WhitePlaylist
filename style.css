@@ -1668,6 +1668,149 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 .modal-card input:focus { border-color: var(--border-strong); box-shadow: 0 0 0 4px var(--accent-glow-soft); }
 
+/* LYRIC VIDEO MODAL (see #lyricVideoModal in index.html /
+   openLyricVideoModal() in app.js) */
+
+.lyric-video-card { max-height: 88vh; display: flex; flex-direction: column; }
+
+.lyric-video-hint {
+  margin: -8px 0 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.lyric-video-mode-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+}
+
+.lyric-video-mode-btn {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.lyric-video-mode-btn.active {
+  background: var(--glass-fill-active);
+  color: #fff;
+}
+
+.lyric-video-lines {
+  max-height: 26vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-fill);
+  border: 1px solid var(--border-strong);
+}
+
+.lyric-video-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.lyric-video-line[dir="rtl"] { text-align: right; }
+
+.lyric-video-line span {
+  flex: 1;
+  font-size: 13.5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lyric-video-line.in-range {
+  background: var(--glass-fill-active);
+  color: #fff;
+}
+
+.lyric-video-line.is-edge {
+  background: var(--accent-glow-soft);
+  color: #fff;
+  font-weight: 700;
+}
+
+.lyric-video-line-marker {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+}
+
+.lyric-video-preview-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 9 / 16;
+  margin: 0 auto 16px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #0a0a0a;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.lyric-video-preview-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.lyric-video-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.lyric-video-preview-empty.hidden { display: none; }
+
+.lyric-video-status {
+  min-height: 18px;
+  margin: 0 0 4px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lyric-video-status.is-error { color: var(--danger); }
+.lyric-video-status.is-sent { color: #8fe3a1; }
+
+#lyricVideoSendButton:disabled {
+  opacity: .45;
+  pointer-events: none;
+}
+
 .modal-actions { display: flex; gap: 10px; margin-top: 15px; }
 .modal-actions button { flex: 1; }
 
