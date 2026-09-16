@@ -338,16 +338,6 @@ async function init() {
   setupSmartMix();
   setupSharePlaylist();
 
-  // Lyric Video's own tab, opened via tg.openLink() in
-  // openLyricVideoModal() — skips the normal full-app boot (song
-  // library, favorites, artists, albums, playlists, home insights)
-  // entirely and jumps straight to that one song's lyric video
-  // screen, since none of the rest of the app is shown here.
-  const launchParams = new URLSearchParams(window.location.search);
-  if (launchParams.get("lv") === "1") {
-    return initLyricVideoStandalone(launchParams);
-  }
-
   renderHomeGreeting();
 
   // Must run before the other loads below so referral attribution
@@ -367,65 +357,6 @@ async function init() {
 
   renderRecentSongs();
   renderHomeDashboard();
-}
-
-// Boots straight into the Lyric Video screen for a single song, for
-// the standalone tab openLyricVideoModal() opens via tg.openLink()
-// (see buildLyricVideoStandaloneUrl()). Runs outside Telegram's
-// in-app browser entirely, so tg/tg.initDataUnsafe are not relied on
-// here — state.userId comes from the uid query param instead, and
-// every API call already authenticates the same way the Mini App's
-// own calls do (X-Telegram-User-Id).
-async function initLyricVideoStandalone(params) {
-  document.body.classList.add("lv-standalone");
-
-  const uid = params.get("uid");
-  if (uid) state.userId = uid;
-
-  const songId = Number(params.get("songId"));
-
-  if (!state.userId || !songId) {
-    showLyricVideoStandaloneError("Missing song info — go back and try again from the app.");
-    return;
-  }
-
-  try {
-    const data = await api("/songs?limit=500");
-    const songs = data.songs || [];
-    const song = songs.find(item => Number(item.id) === songId);
-
-    if (!song) {
-      showLyricVideoStandaloneError("Couldn't find that song.");
-      return;
-    }
-
-    state.songs = songs;
-    state.currentSong = song;
-
-    audio.crossOrigin = "anonymous";
-    audio.src = `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
-    audio.load();
-
-    await new Promise(resolve => loadLyrics(song, resolve));
-
-    if (!lyricVideoHasUsableLyrics()) {
-      showLyricVideoStandaloneError("No synced lyrics for this song.");
-      return;
-    }
-
-    openLyricVideoModalInline();
-  } catch (error) {
-    console.error("Lyric video standalone:", error);
-    showLyricVideoStandaloneError("Couldn't load this song. Check your connection and try again.");
-  }
-}
-
-function showLyricVideoStandaloneError(message) {
-  document.body.innerHTML = `
-    <div class="lv-standalone-error">
-      <p>${escapeHTML(message)}</p>
-    </div>
-  `;
 }
 
 /* =========================================================
@@ -4569,23 +4500,12 @@ function saveLyricsToStorage(songId, result) {
 // into the inline player lyrics ticker. Called whenever the full
 // player loads a song (see updatePlayerUI()), since the ticker is
 // always part of the player layout now — no panel to open.
-// onLoaded (optional) fires once currentLyricsLines has actually been
-// populated — the cached/localStorage branches resolve it
-// synchronously, the network fetch resolves it once that settles.
-// Existing callers that don't need to know when loading finished can
-// keep calling loadLyrics(song) exactly as before.
-function loadLyrics(song, onLoaded) {
-  if (!song || song.id == null) {
-    onLoaded?.();
-    return;
-  }
+function loadLyrics(song) {
+  if (!song || song.id == null) return;
 
   const token = ++lyricsRequestToken;
   const track = document.getElementById("playerLyricsTrack");
-  if (!track) {
-    onLoaded?.();
-    return;
-  }
+  if (!track) return;
 
   activeLyricsLineIndex = -1;
   currentLyricsLines = [];
@@ -4593,7 +4513,6 @@ function loadLyrics(song, onLoaded) {
   const cached = lyricsCache.get(song.id);
   if (cached) {
     buildLyricsList(cached);
-    onLoaded?.();
     return;
   }
 
@@ -4608,7 +4527,6 @@ function loadLyrics(song, onLoaded) {
   if (stored) {
     lyricsCache.set(song.id, stored);
     buildLyricsList(stored);
-    onLoaded?.();
     return;
   }
 
@@ -4622,7 +4540,6 @@ function loadLyrics(song, onLoaded) {
       saveLyricsToStorage(song.id, result);
 
       buildLyricsList(result);
-      onLoaded?.();
     })
     .catch(error => {
       console.error("Lyrics:", error);
@@ -4631,7 +4548,6 @@ function loadLyrics(song, onLoaded) {
       const result = { lines: [], unavailable: true };
       lyricsCache.set(song.id, result);
       buildLyricsList(result);
-      onLoaded?.();
     });
 }
 
@@ -5472,46 +5388,7 @@ function updateLyricVideoMenuVisibility(song) {
   );
 }
 
-// Builds the URL used to hand the Lyric Video feature off to
-// Telegram's system browser (see openLyricVideoModal() below) — same
-// page, but flagged so init() skips the normal full-app boot and goes
-// straight to this one song's lyric video screen (initLyricVideoStandalone()).
-// state.userId is carried over as a plain query param because the
-// destination page runs outside Telegram, so tg.initDataUnsafe won't
-// be populated there — every API call this app makes already trusts
-// this same value via the X-Telegram-User-Id header (see api()),
-// so this isn't a weaker handoff than what the Mini App already does.
-function buildLyricVideoStandaloneUrl(songId) {
-  const url = new URL(window.location.href.split("?")[0]);
-  url.searchParams.set("lv", "1");
-  url.searchParams.set("songId", String(songId));
-  if (state.userId) url.searchParams.set("uid", state.userId);
-  return url.toString();
-}
-
 function openLyricVideoModal() {
-  if (!state.currentSong || !lyricVideoHasUsableLyrics()) return;
-
-  // The live preview here runs a real-time canvas animation loop plus
-  // a live Web Audio graph off the actual <audio> element — together
-  // still meaningfully heavier than Telegram's embedded in-app
-  // browser wants to carry on top of everything else the Mini App is
-  // already doing. Telegram's system browser (a real, full Chrome /
-  // Safari instance, opened via tg.openLink) has no such limits, so
-  // whenever we're actually running inside Telegram, hand off to that
-  // instead of opening this in-place. openLyricVideoModalInline()
-  // below is what runs once we get there (see initLyricVideoStandalone()).
-  if (tg && typeof tg.openLink === "function") {
-    tg.openLink(buildLyricVideoStandaloneUrl(state.currentSong.id), {
-      try_instant_view: false
-    });
-    return;
-  }
-
-  openLyricVideoModalInline();
-}
-
-function openLyricVideoModalInline() {
   if (!state.currentSong || !lyricVideoHasUsableLyrics()) return;
 
   lyricVideoSelection = { start: null, end: null };
@@ -5527,22 +5404,15 @@ function openLyricVideoModalInline() {
     .getElementById("lyricVideoModal")
     ?.classList.remove("hidden");
 
-  // Poppins/Vazirmatn load async (see the Google Fonts <link> in
-  // index.html) — on a rare cold cache the very first draw could
-  // measure text against the fallback font before they finish. One
-  // redraw once document.fonts settles fixes that without adding any
-  // visible delay in the common case where they're already loaded.
-  document.fonts?.ready?.then(() => drawLyricVideoPreview());
-
-  // Setting up the live audio graph (see ensureLyricVideoAudioGraph())
-  // must happen from a real user gesture — this click is one — and
-  // only ever once per page load. The animation loop runs the whole
-  // time the modal is open regardless of whether the graph came up,
-  // since drawLyricVideoPreview()/drawLyricVideoVisualizer() already
-  // no-op the bars gracefully when there's no analyser yet.
-  ensureLyricVideoAudioGraph();
-  lyricVideoAudioCtx?.resume().catch(() => {});
-  startLyricVideoAnimation();
+  // No live preview runs while picking lines anymore — see the notes
+  // on drawLyricVideoPreview() staying hidden behind the placeholder
+  // and startLyricVideoRecording() being the only place that now
+  // starts the audio graph + animation loop. Setting any of that up
+  // here just to sit idle in the background was the actual cause of
+  // both the audio glitching and the line taps not registering: a
+  // 60fps canvas+Web Audio loop competing with the UI for the main
+  // thread the whole time the modal was simply open. Now nothing
+  // heavy runs until the user actually taps Send.
 }
 
 function closeLyricVideoModal() {
@@ -5637,7 +5507,6 @@ function handleLyricVideoLineTap(index) {
   }
 
   updateLyricVideoLinesUI();
-  drawLyricVideoPreview();
   updateLyricVideoSendButtonEnabled();
 }
 
@@ -6038,7 +5907,6 @@ function getLyricVideoLayout(ctx, maxWidth, maxHeight) {
 
 function drawLyricVideoPreview() {
   const canvas = document.getElementById("lyricVideoCanvas");
-  const empty = document.getElementById("lyricVideoPreviewEmpty");
   if (!canvas) return;
 
   const { start, end } = lyricVideoSelection;
@@ -6072,8 +5940,13 @@ function drawLyricVideoPreview() {
   const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
 
   drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
-
-  empty?.classList.add("hidden");
+  // Note: the "empty" placeholder over the canvas is intentionally
+  // left as-is here (see the status line + placeholder handling in
+  // startLyricVideoRecording()/setLyricVideoSendStatus()) — this
+  // function only ever runs now while a clip is actively being
+  // captured for recording, and the raw live frames it draws aren't
+  // meant to be shown to the user; they only see the status text
+  // ("Recording…" → "Sending…" → "Sent ✓") until the result is ready.
 }
 
 /* --- Live audio graph + animation loop ---
@@ -6271,6 +6144,12 @@ function startLyricVideoRecording() {
     return;
   }
 
+  // Also needs the cover art in place before the first captured
+  // frame — normally loaded when the modal opened, but do it here
+  // too in case it's still pending (a slow network, say) since the
+  // preview canvas was never drawn until now.
+  loadLyricVideoCoverImage(state.currentSong);
+
   const streamDest = ensureLyricVideoStreamDestination();
   const mimeType = pickLyricVideoMimeType();
   const canvas = document.getElementById("lyricVideoCanvas");
@@ -6322,6 +6201,7 @@ function startLyricVideoRecording() {
     clearTimeout(lyricVideoRecordStopTimer);
     lyricVideoRecordStopTimer = null;
 
+    stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
 
     const chunks = lyricVideoRecordChunks;
@@ -6338,6 +6218,7 @@ function startLyricVideoRecording() {
 
   recorder.onerror = event => {
     console.error("Lyric video recorder error:", event.error);
+    stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
     setLyricVideoSendStatus("error");
   };
@@ -6356,6 +6237,14 @@ function startLyricVideoRecording() {
 
     recorder.start();
     audio.play().catch(err => console.error("Lyric video playback:", err));
+
+    // The animation loop (see startLyricVideoAnimation()) only runs
+    // for this bounded capture window now, not for as long as the
+    // modal happens to be open — it's what keeps drawLyricVideoPreview()
+    // actually redrawing the canvas each frame so captureStream(30)
+    // has moving frames (karaoke highlight, visualizer bars) to
+    // record instead of one frozen frame repeated for the whole clip.
+    startLyricVideoAnimation();
 
     lyricVideoRecordStopTimer = setTimeout(() => {
       if (recorder.state !== "inactive") recorder.stop();
@@ -6398,6 +6287,7 @@ function cancelLyricVideoRecording() {
   }
 
   lyricVideoRecordChunks = [];
+  stopLyricVideoAnimation();
   restoreLyricVideoPlaybackState();
   setLyricVideoSendStatus("idle");
 }
