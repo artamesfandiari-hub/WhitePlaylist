@@ -5644,8 +5644,15 @@ const LYRIC_VIDEO_TAIL_SECONDS = 2.2;
 // "Recording…" for however long that turned out to be. This is a
 // hard ceiling on the recorded clip itself, applied in
 // startLyricVideoRecording() regardless of the selected lines' own
-// timestamps.
-const LYRIC_VIDEO_MAX_DURATION_SECONDS = 20;
+// timestamps. 60s was picked as generous headroom for a real
+// multi-line selection while still landing well under both Telegram's
+// ~50MB bot upload limit and LYRIC_VIDEO_MAX_BYTES in worker.js — at
+// this canvas's 2.5Mbps video + ~128kbps audio, a full 60s clip is
+// roughly (2.5 + .128) * 60 / 8 ≈ 20MB, nowhere near either limit. A
+// shorter 20s cap once lived here but cut a genuinely longer
+// selection off before its own picked end line, instead of just
+// guarding against an unbounded one.
+const LYRIC_VIDEO_MAX_DURATION_SECONDS = 60;
 
 // Builds the karaoke tokens for one lyric line. When enhanced LRC
 // gave this line per-word timing (line.words), each word is its own
@@ -5945,6 +5952,7 @@ function drawLyricVideoPreview() {
   const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
 
   drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
+  drawLyricVideoWatermark(ctx, w, h);
   // Note: the "empty" placeholder over the canvas is intentionally
   // left as-is here (see the status line + placeholder handling in
   // startLyricVideoRecording()/setLyricVideoSendStatus()) — this
@@ -5952,6 +5960,23 @@ function drawLyricVideoPreview() {
   // captured for recording, and the raw live frames it draws aren't
   // meant to be shown to the user; they only see the status text
   // ("Recording…" → "Sending…" → "Sent ✓") until the result is ready.
+}
+
+// Small brand mark near the bottom of every recorded clip, so a
+// forwarded/re-shared video is still recognizable as having come from
+// the bot — same all-caps treatment as the in-app header (see
+// .brand in index.html), just dimmed enough not to compete with the
+// lyric text above it.
+function drawLyricVideoWatermark(ctx, w, h) {
+  ctx.save();
+  ctx.font = `700 ${Math.round(w * .032)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.shadowColor = "rgba(0,0,0,.55)";
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  ctx.fillText("WHITE PLAYLIST", w / 2, h - h * .035);
+  ctx.restore();
 }
 
 /* --- Live audio graph + animation loop ---
