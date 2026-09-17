@@ -5761,7 +5761,14 @@ function drawLyricVideoLyricRows(ctx, rows, fontSize, centerX, startY) {
     ctx.font = `800 ${fontSize}px ${lyricVideoFontFamily(row.dir)}`;
     ctx.textBaseline = "middle";
     ctx.shadowColor = "rgba(0,0,0,.55)";
-    ctx.shadowBlur = 18;
+    // Was 18 — Canvas2D shadow blur cost scales with the blur radius,
+    // and Safari recomputes it per fillText call, not once per
+    // ctx.shadowBlur assignment. Multiplied across every token, every
+    // row, every captured frame, this was real recurring load during
+    // a *live* recording (see the note on LYRIC_VIDEO_CAPTURE_FPS
+    // above) — a smaller radius still reads as a soft legibility
+    // shadow at this text size, just cheaper to redraw 24x/sec.
+    ctx.shadowBlur = 8;
 
     if (row.dir === "rtl") {
       ctx.textAlign = "right";
@@ -5973,7 +5980,7 @@ function drawLyricVideoWatermark(ctx, w, h) {
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.shadowColor = "rgba(0,0,0,.55)";
-  ctx.shadowBlur = 10;
+  ctx.shadowBlur = 6;
   ctx.fillStyle = "rgba(255,255,255,.55)";
   ctx.fillText("WHITE PLAYLIST", w / 2, h - h * .035);
   ctx.restore();
@@ -6040,12 +6047,19 @@ function ensureLyricVideoAudioGraph() {
 
 let lyricVideoAnimationFrame = null;
 
-// Now that drawLyricVideoPreview() reuses cached background/layout
-// (see getLyricVideoBackground()/getLyricVideoLayout() above), a full
-// 60fps loop is no longer needed — the karaoke coloring reads fine at
-// ~30fps, and capping it here leaves more main thread headroom for
-// taps on the lyric line list and for audio.
-const LYRIC_VIDEO_FRAME_INTERVAL_MS = 1000 / 30;
+// Every fillText call with a shadow, on every token, on every row,
+// every single frame, for up to 60s straight (see
+// LYRIC_VIDEO_MAX_DURATION_SECONDS) is real, sustained main-thread
+// load — and because this is a *live* capture (captureStream() + a
+// real-time audio.play(), not an offline frame-by-frame render), any
+// stretch where that load causes the thread to fall behind doesn't
+// just look janky in the UI — it bakes directly into the recorded
+// file's timing, which is what's been showing up downstream as
+// sped-up/pitched-up audio and lyric text that drifts out of sync.
+// 24fps (down from 30) measurably cuts how often this drawing runs
+// without the karaoke highlighting looking any less smooth.
+const LYRIC_VIDEO_CAPTURE_FPS = 24;
+const LYRIC_VIDEO_FRAME_INTERVAL_MS = 1000 / LYRIC_VIDEO_CAPTURE_FPS;
 
 function startLyricVideoAnimation() {
   stopLyricVideoAnimation();
@@ -6229,7 +6243,7 @@ function startLyricVideoRecording() {
     wasPlaying: !audio.paused
   };
 
-  const videoStream = canvas.captureStream(30);
+  const videoStream = canvas.captureStream(LYRIC_VIDEO_CAPTURE_FPS);
   const combined = new MediaStream([
     ...videoStream.getVideoTracks(),
     ...streamDest.stream.getAudioTracks()
