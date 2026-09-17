@@ -5637,6 +5637,16 @@ function lyricVideoFontFamily(dir) {
 // "next word" to mark where its highlight should end.
 const LYRIC_VIDEO_TAIL_SECONDS = 2.2;
 
+// Nothing capped how far apart the picked start/end lines could be —
+// pick lines from opposite ends of a song and the "clip" was really
+// the whole track, so recording (and the eventual upload) took that
+// long with zero feedback in the UI, which just looked frozen on
+// "Recording…" for however long that turned out to be. This is a
+// hard ceiling on the recorded clip itself, applied in
+// startLyricVideoRecording() regardless of the selected lines' own
+// timestamps.
+const LYRIC_VIDEO_MAX_DURATION_SECONDS = 20;
+
 // Builds the karaoke tokens for one lyric line. When enhanced LRC
 // gave this line per-word timing (line.words), each word is its own
 // token so it lights up individually. Otherwise every plain word in
@@ -6047,14 +6057,14 @@ function stopLyricVideoAnimation() {
 
 // A second, parallel tap off the same MediaElementAudioSourceNode
 // used for the analyser (lyricVideoSourceNode) — one node can feed
-// multiple destinations, so this doesn't disturb playback or the
-// visualizer. Created lazily, once, the first time a recording
-// actually starts.
+// multiple destinations, so this doesn't disturb normal playback.
+// Created lazily, once, the first time a recording actually starts.
 let lyricVideoStreamDest = null;
 
 let lyricVideoRecorder = null;
 let lyricVideoRecordChunks = [];
 let lyricVideoRecordStopTimer = null;
+let lyricVideoRecordProgressTimer = null;
 let lyricVideoRecordMimeType = null;
 
 // { time, wasPlaying } snapshot of playback taken right before a
@@ -6184,7 +6194,10 @@ function startLyricVideoRecording() {
   const firstLine = currentLyricsLines[start];
   const lastLine = currentLyricsLines[end];
   const recordStart = Math.max(0, firstLine.time - .2);
-  const recordEnd = lastLine.time + LYRIC_VIDEO_TAIL_SECONDS;
+  const recordEnd = Math.min(
+    lastLine.time + LYRIC_VIDEO_TAIL_SECONDS,
+    recordStart + LYRIC_VIDEO_MAX_DURATION_SECONDS
+  );
   const durationMs = Math.max(500, (recordEnd - recordStart) * 1000);
 
   lyricVideoResumeState = {
@@ -6222,6 +6235,7 @@ function startLyricVideoRecording() {
   recorder.onstop = () => {
     clearTimeout(lyricVideoRecordStopTimer);
     lyricVideoRecordStopTimer = null;
+    stopLyricVideoRecordProgress();
 
     stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
@@ -6240,6 +6254,7 @@ function startLyricVideoRecording() {
 
   recorder.onerror = event => {
     console.error("Lyric video recorder error:", event.error);
+    stopLyricVideoRecordProgress();
     stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
     setLyricVideoSendStatus("error");
@@ -6268,6 +6283,12 @@ function startLyricVideoRecording() {
     // one frozen frame repeated for the whole clip.
     startLyricVideoAnimation();
 
+    // A ticking "Recording… Xs / Ys" readout — without this, a
+    // legitimately multi-second clip and a genuinely stuck recording
+    // looked identical to the user: the same static "Recording the
+    // clip — leave this open…" line the entire time either way.
+    startLyricVideoRecordProgress(durationMs);
+
     lyricVideoRecordStopTimer = setTimeout(() => {
       if (recorder.state !== "inactive") recorder.stop();
     }, durationMs);
@@ -6280,6 +6301,35 @@ function startLyricVideoRecording() {
   // a short fallback timer guarantees recording still starts either
   // way, instead of silently hanging on "Recording…" forever.
   setTimeout(beginCaptureAndPlay, 400);
+}
+
+// Ticks the status line under the Send button while a clip is being
+// captured, so the modal never looks frozen even during a
+// legitimately long (up to LYRIC_VIDEO_MAX_DURATION_SECONDS) clip.
+function startLyricVideoRecordProgress(durationMs) {
+  const statusEl = document.getElementById("lyricVideoStatus");
+  if (!statusEl) return;
+
+  const startedAt = performance.now();
+  const totalSeconds = Math.ceil(durationMs / 1000);
+
+  const tick = () => {
+    const elapsedSeconds = Math.min(
+      totalSeconds,
+      Math.floor((performance.now() - startedAt) / 1000)
+    );
+    statusEl.textContent = `Recording… ${elapsedSeconds}s / ${totalSeconds}s`;
+  };
+
+  tick();
+  lyricVideoRecordProgressTimer = setInterval(tick, 250);
+}
+
+function stopLyricVideoRecordProgress() {
+  if (lyricVideoRecordProgressTimer) {
+    clearInterval(lyricVideoRecordProgressTimer);
+    lyricVideoRecordProgressTimer = null;
+  }
 }
 
 function restoreLyricVideoPlaybackState() {
@@ -6301,6 +6351,7 @@ function cancelLyricVideoRecording() {
     clearTimeout(lyricVideoRecordStopTimer);
     lyricVideoRecordStopTimer = null;
   }
+  stopLyricVideoRecordProgress();
 
   if (lyricVideoRecorder && lyricVideoRecorder.state !== "inactive") {
     lyricVideoRecorder.onstop = null;
