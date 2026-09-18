@@ -5887,8 +5887,8 @@ function getLyricVideoBackground(w, h) {
     ctx.fillRect(0, 0, w, h);
   }
 
-  // Top/bottom gradient so the visualizer, lyric text, and footer
-  // all stay legible over any cover.
+  // Top/bottom gradient so the lyric text and footer branding stay
+  // legible over any cover.
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
   gradient.addColorStop(0, "rgba(0,0,0,.45)");
   gradient.addColorStop(.3, "rgba(0,0,0,.15)");
@@ -5896,6 +5896,56 @@ function getLyricVideoBackground(w, h) {
   gradient.addColorStop(1, "rgba(0,0,0,.8)");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, w, h);
+
+  // A small crisp cover-art thumbnail near the top — everything else
+  // on this canvas is either blurred (the background) or text, so
+  // this is the one sharp, recognizable element that reads as "this
+  // is that song" at a glance, the way most lyric-video templates
+  // anchor themselves with the actual artwork rather than relying on
+  // its blurred backdrop alone. Baked into this same cached layer
+  // (song art doesn't change frame to frame), so it costs nothing
+  // during the live capture either.
+  if (lyricVideoCoverImg) {
+    const size = w * .22;
+    const cx = w / 2 - size / 2;
+    const cy = h * .07;
+    const radius = size * .14;
+
+    const roundedRectPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(cx + radius, cy);
+      ctx.arcTo(cx + size, cy, cx + size, cy + size, radius);
+      ctx.arcTo(cx + size, cy + size, cx, cy + size, radius);
+      ctx.arcTo(cx, cy + size, cx, cy, radius);
+      ctx.arcTo(cx, cy, cx + size, cy, radius);
+      ctx.closePath();
+    };
+
+    // Cast the drop shadow from an actual filled shape first — a
+    // shadow only renders from something that's actually painted;
+    // setting shadow properties and then only calling clip() (as an
+    // earlier version of this did) paints nothing, so no shadow ever
+    // showed up. Filled here, then covered completely by the crisp
+    // artwork drawn within the same clip path right after.
+    ctx.save();
+    roundedRectPath();
+    ctx.shadowColor = "rgba(0,0,0,.5)";
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "#000";
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    roundedRectPath();
+    ctx.clip();
+
+    const coverScale = Math.max(size / lyricVideoCoverImg.width, size / lyricVideoCoverImg.height);
+    const cdw = lyricVideoCoverImg.width * coverScale;
+    const cdh = lyricVideoCoverImg.height * coverScale;
+    ctx.drawImage(lyricVideoCoverImg, cx + (size - cdw) / 2, cy + (size - cdh) / 2, cdw, cdh);
+    ctx.restore();
+  }
 
   // Footer branding: song title + artist. Static per song, so it's
   // baked into the cached layer too instead of being redrawn per frame.
