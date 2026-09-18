@@ -6510,9 +6510,31 @@ function startLyricVideoRecording() {
   audio.pause();
 
   let seekHandled = false;
+  const seekWaitStartedAt = performance.now();
 
   const beginCaptureAndPlay = async () => {
     if (seekHandled) return;
+
+    // Under a slow/VPN-routed connection, a seek can genuinely still
+    // be in flight past the old fixed 400ms fallback — proceeding
+    // anyway meant audio.currentTime could still be wherever it was
+    // *before* this recording started (e.g. left over from a previous
+    // clip in the same modal session), not recordStart. Every timing
+    // assumption downstream (the intro/outro fade, the karaoke
+    // keyframe picked, even how far into the song the clip actually
+    // starts) reads straight from audio.currentTime, so a seek that
+    // hasn't landed yet explains a lot at once: text/watermark already
+    // fully visible on the very first frame instead of faded in, and
+    // a clip that doesn't actually start where it was supposed to.
+    // Keep polling (up to 1.5s total) until the position has actually
+    // arrived, rather than trusting a single fixed timeout.
+    const closeEnough = Math.abs(audio.currentTime - recordStart) < .3;
+    const waitedTooLong = performance.now() - seekWaitStartedAt > 1500;
+    if (!closeEnough && !waitedTooLong) {
+      setTimeout(beginCaptureAndPlay, 50);
+      return;
+    }
+
     seekHandled = true;
     audio.removeEventListener("seeked", beginCaptureAndPlay);
 
@@ -6537,6 +6559,18 @@ function startLyricVideoRecording() {
     }
 
     if (lyricVideoSendStatus !== "recording") return; // cancelled while resuming
+
+    // Paint the correct (faded-in, alpha≈0) frame onto the canvas
+    // *before* the recorder starts pulling from it — captureStream()
+    // grabs whatever's currently on the canvas the instant it starts,
+    // which could otherwise be a stale frame left over from an
+    // earlier draw (a previous attempt in this same modal session, a
+    // moment of browsing lines) still sitting there until the
+    // animation loop's own first tick overwrites it a frame or two
+    // later. That stale-first-frame gap is what showed up as the
+    // lyric block/watermark flashing in at full opacity before
+    // properly fading in.
+    drawLyricVideoPreview();
 
     recorder.start();
     audio.play().catch(err => console.error("Lyric video playback:", err));
@@ -6587,8 +6621,11 @@ function startLyricVideoRecording() {
 
   // Some browsers don't fire "seeked" for a very small time delta —
   // a short fallback timer guarantees recording still starts either
-  // way, instead of silently hanging on "Recording…" forever.
-  setTimeout(beginCaptureAndPlay, 400);
+  // way. beginCaptureAndPlay() itself now re-checks the actual
+  // position and keeps retrying (up to 1.5s) rather than trusting
+  // this first call blindly, so this initial delay just needs to
+  // catch the common case quickly.
+  setTimeout(beginCaptureAndPlay, 100);
 }
 
 // Ticks the status line under the Send button while a clip is being
