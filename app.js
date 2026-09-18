@@ -5953,8 +5953,29 @@ function drawLyricVideoPreview() {
   const w = canvas.width;
   const h = canvas.height;
 
-  ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(getLyricVideoBackground(w, h), 0, 0);
+  // How far into the clip's own capture window "now" is, 0→1 across
+  // its whole length — used below for a slow, continuous background
+  // zoom. Computed once here since both the zoom and the intro/outro
+  // fade need a version of this same progress value.
+  let clipProgress = 0;
+  if (lyricVideoCaptureStart !== null && lyricVideoCaptureEnd !== null) {
+    const span = lyricVideoCaptureEnd - lyricVideoCaptureStart;
+    clipProgress = span > 0
+      ? Math.min(1, Math.max(0, (audio.currentTime - lyricVideoCaptureStart) / span))
+      : 0;
+  }
+
+  // A slow Ken Burns drift on the cached blurred cover art — the
+  // background bitmap itself is still built exactly once (see
+  // getLyricVideoBackground()); this only changes which cropped
+  // region of it gets drawn each frame, so it's one drawImage call
+  // either way, not a re-render. 6% max zoom over the whole clip is
+  // enough to read as "alive" without being distracting behind text.
+  const bg = getLyricVideoBackground(w, h);
+  const zoomScale = 1 + clipProgress * .06;
+  const sw = w / zoomScale;
+  const sh = h / zoomScale;
+  ctx.drawImage(bg, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, w, h);
 
   // Lyric text — karaoke-highlighted, wrapped per original line.
   // Layout (font size, wrapping) is cached; only word colors change
@@ -5971,18 +5992,22 @@ function drawLyricVideoPreview() {
   // Fades the lyric block + watermark in/out across the padded
   // lead-in and tail (see LYRIC_VIDEO_INTRO_PAD_SECONDS/
   // LYRIC_VIDEO_OUTRO_PAD_SECONDS) instead of having them just snap
-  // on/off screen at the clip's raw edges. A slight upward settle
-  // rides along with the fade-in for a bit of motion, not just an
-  // opacity change. Only meaningful during an actual capture (see
-  // lyricVideoCaptureStart/End, set in startLyricVideoRecording());
+  // on/off screen at the clip's raw edges. Eased with smoothstep
+  // (was a straight linear ramp) so it settles in/out rather than
+  // moving at a constant, slightly mechanical rate. A slight upward
+  // settle rides along with the fade-in for a bit of motion, not
+  // just an opacity change. Only meaningful during an actual capture
+  // (see lyricVideoCaptureStart/End, set in startLyricVideoRecording());
   // outside of one this is just 1 (fully visible), same as before.
+  const smoothstep = x => x * x * (3 - 2 * x);
+
   let introOutroAlpha = 1;
   let settleOffsetY = 0;
 
   if (lyricVideoCaptureStart !== null && lyricVideoCaptureEnd !== null) {
     const t = audio.currentTime;
-    const introT = Math.min(1, Math.max(0, (t - lyricVideoCaptureStart) / LYRIC_VIDEO_INTRO_PAD_SECONDS));
-    const outroT = Math.min(1, Math.max(0, (lyricVideoCaptureEnd - t) / LYRIC_VIDEO_OUTRO_PAD_SECONDS));
+    const introT = smoothstep(Math.min(1, Math.max(0, (t - lyricVideoCaptureStart) / LYRIC_VIDEO_INTRO_PAD_SECONDS)));
+    const outroT = smoothstep(Math.min(1, Math.max(0, (lyricVideoCaptureEnd - t) / LYRIC_VIDEO_OUTRO_PAD_SECONDS)));
     introOutroAlpha = Math.min(introT, outroT);
     settleOffsetY = (1 - introT) * fontSize * .5;
   }
