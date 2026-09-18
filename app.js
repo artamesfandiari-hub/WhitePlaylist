@@ -5637,6 +5637,17 @@ function lyricVideoFontFamily(dir) {
 // "next word" to mark where its highlight should end.
 const LYRIC_VIDEO_TAIL_SECONDS = 2.2;
 
+// Extra breathing room tacked onto both ends of the clip, on top of
+// the tail above — before this, recording started right as the first
+// line's own highlight began and stopped right after the last one's,
+// so the clip felt like it cut into the lyric mid-beat on both sides.
+// These double as the fade in/out window (see the intro/outro alpha
+// in drawLyricVideoPreview()), so the extra time isn't just dead air
+// — the lyric block/watermark visibly fades and settles into place
+// during it instead of just snapping on screen.
+const LYRIC_VIDEO_INTRO_PAD_SECONDS = 2;
+const LYRIC_VIDEO_OUTRO_PAD_SECONDS = 2;
+
 // Nothing capped how far apart the picked start/end lines could be —
 // pick lines from opposite ends of a song and the "clip" was really
 // the whole track, so recording (and the eventual upload) took that
@@ -5752,9 +5763,8 @@ function fitLyricVideoFontSize(ctx, maxWidth, maxHeight, min, max) {
   return best;
 }
 
-function drawLyricVideoLyricRows(ctx, rows, fontSize, centerX, startY) {
+function drawLyricVideoLyricRows(ctx, rows, fontSize, centerX, startY, t) {
   const lineHeight = fontSize * 1.32;
-  const t = audio.currentTime;
 
   rows.forEach((row, rowIndex) => {
     const y = startY + rowIndex * lineHeight;
@@ -5958,8 +5968,58 @@ function drawLyricVideoPreview() {
   const blockHeight = rows.length * lineHeight;
   const startY = h / 2 - blockHeight / 2 + lineHeight / 2;
 
-  drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY);
-  drawLyricVideoWatermark(ctx, w, h);
+  // Fades the lyric block + watermark in/out across the padded
+  // lead-in and tail (see LYRIC_VIDEO_INTRO_PAD_SECONDS/
+  // LYRIC_VIDEO_OUTRO_PAD_SECONDS) instead of having them just snap
+  // on/off screen at the clip's raw edges. A slight upward settle
+  // rides along with the fade-in for a bit of motion, not just an
+  // opacity change. Only meaningful during an actual capture (see
+  // lyricVideoCaptureStart/End, set in startLyricVideoRecording());
+  // outside of one this is just 1 (fully visible), same as before.
+  let introOutroAlpha = 1;
+  let settleOffsetY = 0;
+
+  if (lyricVideoCaptureStart !== null && lyricVideoCaptureEnd !== null) {
+    const t = audio.currentTime;
+    const introT = Math.min(1, Math.max(0, (t - lyricVideoCaptureStart) / LYRIC_VIDEO_INTRO_PAD_SECONDS));
+    const outroT = Math.min(1, Math.max(0, (lyricVideoCaptureEnd - t) / LYRIC_VIDEO_OUTRO_PAD_SECONDS));
+    introOutroAlpha = Math.min(introT, outroT);
+    settleOffsetY = (1 - introT) * fontSize * .5;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = introOutroAlpha;
+
+  const activeKeyframe = findLyricVideoKeyframe(audio.currentTime);
+
+  if (activeKeyframe) {
+    // The fast path: two cheap blits instead of re-shaping/re-shadowing
+    // every word every frame (see buildLyricVideoKeyframes() above).
+    // This only runs once startLyricVideoRecording() has actually
+    // built the keyframes for the current selection.
+    ctx.drawImage(
+      activeKeyframe.canvas,
+      w / 2 - lyricVideoKeyframeBlockSize.width / 2,
+      startY - lineHeight / 2 + settleOffsetY
+    );
+
+    if (lyricVideoWatermarkCanvas) {
+      ctx.drawImage(
+        lyricVideoWatermarkCanvas,
+        0,
+        startY + blockHeight + settleOffsetY + w * .09 - lyricVideoWatermarkSize.baseline
+      );
+    }
+  } else {
+    // Fallback for any draw that somehow happens before keyframes are
+    // built (there shouldn't be one — see startLyricVideoRecording())
+    // — the original live-drawing path, kept around defensively
+    // rather than leaving this silently blank.
+    drawLyricVideoLyricRows(ctx, rows, fontSize, w / 2, startY + settleOffsetY, audio.currentTime);
+    drawLyricVideoWatermark(ctx, w, startY + blockHeight + settleOffsetY);
+  }
+
+  ctx.restore();
   // Note: the "empty" placeholder over the canvas is intentionally
   // left as-is here (see the status line + placeholder handling in
   // startLyricVideoRecording()/setLyricVideoSendStatus()) — this
@@ -5969,12 +6029,12 @@ function drawLyricVideoPreview() {
   // ("Recording…" → "Sending…" → "Sent ✓") until the result is ready.
 }
 
-// Small brand mark near the bottom of every recorded clip, so a
-// forwarded/re-shared video is still recognizable as having come from
-// the bot — same all-caps treatment as the in-app header (see
-// .brand in index.html), just dimmed enough not to compete with the
-// lyric text above it.
-function drawLyricVideoWatermark(ctx, w, h) {
+// Small brand mark placed just under the lyric block itself (not
+// down by the footer song title/artist — that's baked into the
+// cached background layer a little further down, and the two were
+// sitting close enough to visually collide). blockBottomY is the y
+// just past the last drawn lyric row, from drawLyricVideoPreview().
+function drawLyricVideoWatermark(ctx, w, blockBottomY) {
   ctx.save();
   ctx.font = `700 ${Math.round(w * .032)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
   ctx.textAlign = "center";
@@ -5982,8 +6042,113 @@ function drawLyricVideoWatermark(ctx, w, h) {
   ctx.shadowColor = "rgba(0,0,0,.55)";
   ctx.shadowBlur = 6;
   ctx.fillStyle = "rgba(255,255,255,.55)";
-  ctx.fillText("WHITE PLAYLIST", w / 2, h - h * .035);
+  ctx.fillText("WHITE PLAYLIST", w / 2, blockBottomY + w * .09);
   ctx.restore();
+}
+
+// --- Pre-rendered keyframes for the *live capture* only ---
+// drawLyricVideoLyricRows()/drawLyricVideoWatermark() above are real
+// Canvas2D text work — font shaping + a drop shadow, per token, per
+// row, every frame. That's fine for a one-off draw, but this modal's
+// whole capture is a *live*, real-time recording (captureStream() +
+// a real audio.play() driving it) — any main-thread stretch that
+// falls behind during those ~24 draws/sec doesn't just look janky, it
+// gets baked straight into the recorded file's timing. That's what's
+// been showing up downstream as sped-up/pitched-up audio and lyric
+// text drifting out of sync, and it's the actual thing worth fixing
+// here, not just trimming shadow radii.
+//
+// A word's on-screen color only changes at its own start/end
+// timestamp — there's a small, fixed number of distinct "look" states
+// across the whole clip. So instead of redrawing text live,
+// buildLyricVideoKeyframes() renders each of those states once, up
+// front, onto its own small offscreen canvas (not time-constrained —
+// this runs before recorder.start(), never during the live capture),
+// and the live path just picks the right one for the current time and
+// blits it. A canvas blit is a fraction of the cost of re-shaping and
+// re-shadowing every word every frame.
+let lyricVideoLyricKeyframes = null; // [{ t, canvas }], sorted ascending by t
+let lyricVideoWatermarkCanvas = null;
+let lyricVideoKeyframeBlockSize = { width: 0, height: 0 };
+let lyricVideoWatermarkSize = { width: 0, height: 0, baseline: 0 };
+
+function buildLyricVideoKeyframes(rows, fontSize, maxWidth, w) {
+  const lineHeight = fontSize * 1.32;
+  const blockWidth = maxWidth;
+  const blockHeight = rows.length * lineHeight;
+
+  // Every point where some token's color could change: each token's
+  // own start and end. A time before all of them (well before the
+  // clip's own recordStart works fine) covers the "nothing sung yet"
+  // state so there's always a keyframe active from the very first
+  // captured frame.
+  const boundaries = new Set([-1]);
+  rows.forEach(row => {
+    row.tokens.forEach(token => {
+      boundaries.add(token.start);
+      boundaries.add(token.end);
+    });
+  });
+
+  const sorted = Array.from(boundaries).sort((a, b) => a - b);
+
+  // Safety valve: a long, word-dense selection (fast rap, a big
+  // multi-line clip near LYRIC_VIDEO_MAX_DURATION_SECONDS) could have
+  // enough distinct boundaries that rendering one full-size canvas
+  // per keyframe adds up to real memory — trading the original
+  // main-thread/timing risk for a crash risk would be worse, not
+  // better. Past this many, skip precompute entirely for this
+  // recording; drawLyricVideoPreview() already falls back to the
+  // original live per-frame drawing whenever there are no keyframes.
+  const LYRIC_VIDEO_MAX_KEYFRAMES = 80;
+  if (sorted.length > LYRIC_VIDEO_MAX_KEYFRAMES) {
+    lyricVideoLyricKeyframes = null;
+  } else {
+    lyricVideoLyricKeyframes = sorted.map(t => {
+      const mini = document.createElement("canvas");
+      mini.width = blockWidth;
+      mini.height = blockHeight;
+      const mctx = mini.getContext("2d");
+      drawLyricVideoLyricRows(mctx, rows, fontSize, blockWidth / 2, lineHeight / 2, t);
+      return { t, canvas: mini };
+    });
+  }
+
+  lyricVideoKeyframeBlockSize = { width: blockWidth, height: blockHeight };
+
+  // The watermark's look never changes with time at all — one canvas,
+  // built once alongside the lyric keyframes (both only ever needed
+  // together, right before a recording starts).
+  const wmFontPx = Math.round(w * .032);
+  const wmHeight = Math.ceil(wmFontPx * 1.6) + 16;
+  const wmBaseline = wmHeight - 10;
+
+  const wm = document.createElement("canvas");
+  wm.width = w;
+  wm.height = wmHeight;
+  drawLyricVideoWatermark(wm.getContext("2d"), w, wmBaseline - w * .09);
+  lyricVideoWatermarkCanvas = wm;
+  lyricVideoWatermarkSize = { width: w, height: wmHeight, baseline: wmBaseline };
+}
+
+function clearLyricVideoKeyframes() {
+  lyricVideoLyricKeyframes = null;
+  lyricVideoWatermarkCanvas = null;
+}
+
+// Last keyframe whose own time is still <= t (keyframes are sorted
+// ascending, and there are only ever a few dozen at most, so a plain
+// scan is both simple and plenty fast for something that only runs
+// live during capture).
+function findLyricVideoKeyframe(t) {
+  if (!lyricVideoLyricKeyframes || !lyricVideoLyricKeyframes.length) return null;
+
+  let active = lyricVideoLyricKeyframes[0];
+  for (const kf of lyricVideoLyricKeyframes) {
+    if (kf.t > t) break;
+    active = kf;
+  }
+  return active;
 }
 
 /* --- Live audio graph + animation loop ---
@@ -6112,17 +6277,37 @@ let lyricVideoRecordMimeType = null;
 // disturbed.
 let lyricVideoResumeState = null;
 
+// The clip's [recordStart, recordEnd] window in terms of audio.
+// currentTime, set at the top of startLyricVideoRecording() and read
+// by drawLyricVideoPreview() to compute the intro/outro fade — kept
+// at module scope since that's the only way the draw loop (driven by
+// its own rAF callback) can see it. Reset to null once a
+// recording/cancel is fully done, so a stray draw outside an actual
+// capture never applies a stale fade window.
+let lyricVideoCaptureStart = null;
+let lyricVideoCaptureEnd = null;
+
 // idle | recording | uploading | sent | error — drives both the
 // send button's label/disabled state and the status line under the
 // preview (see setLyricVideoSendStatus()).
 let lyricVideoSendStatus = "idle";
+
+// GainNode inserted between the source and the recording tap, purely
+// to fade the *captured* audio in/out — separate from
+// lyricVideoMonitorGain above, which mutes the speaker path and never
+// touches what's recorded. Ramped in startLyricVideoRecording() to
+// match the padded lead-in/tail so the clip's audio doesn't just
+// cut in/out abruptly at its edges.
+let lyricVideoRecordFadeGain = null;
 
 function ensureLyricVideoStreamDestination() {
   if (lyricVideoStreamDest) return lyricVideoStreamDest;
   if (!lyricVideoAudioGraphReady || !lyricVideoSourceNode) return null;
 
   lyricVideoStreamDest = lyricVideoAudioCtx.createMediaStreamDestination();
-  lyricVideoSourceNode.connect(lyricVideoStreamDest);
+  lyricVideoRecordFadeGain = lyricVideoAudioCtx.createGain();
+  lyricVideoSourceNode.connect(lyricVideoRecordFadeGain);
+  lyricVideoRecordFadeGain.connect(lyricVideoStreamDest);
   return lyricVideoStreamDest;
 }
 
@@ -6231,12 +6416,29 @@ function startLyricVideoRecording() {
 
   const firstLine = currentLyricsLines[start];
   const lastLine = currentLyricsLines[end];
-  const recordStart = Math.max(0, firstLine.time - .2);
+  const recordStart = Math.max(0, firstLine.time - .2 - LYRIC_VIDEO_INTRO_PAD_SECONDS);
   const recordEnd = Math.min(
-    lastLine.time + LYRIC_VIDEO_TAIL_SECONDS,
+    lastLine.time + LYRIC_VIDEO_TAIL_SECONDS + LYRIC_VIDEO_OUTRO_PAD_SECONDS,
     recordStart + LYRIC_VIDEO_MAX_DURATION_SECONDS
   );
   const durationMs = Math.max(500, (recordEnd - recordStart) * 1000);
+
+  lyricVideoCaptureStart = recordStart;
+  lyricVideoCaptureEnd = recordEnd;
+
+  // Precompute every distinct lyric-color "look" the clip will pass
+  // through, up front — nothing here runs during the live capture
+  // itself (see buildLyricVideoKeyframes()). Reuses the same cached
+  // layout drawLyricVideoPreview() would otherwise recompute, so this
+  // is just the keyframe rendering, not redundant layout work.
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const padding = w * .1;
+  const maxWidth = w - padding * 2;
+  const maxHeight = h * .4;
+  const { fontSize, rows } = getLyricVideoLayout(ctx, maxWidth, maxHeight);
+  buildLyricVideoKeyframes(rows, fontSize, maxWidth, w);
 
   lyricVideoResumeState = {
     time: audio.currentTime,
@@ -6277,6 +6479,9 @@ function startLyricVideoRecording() {
 
     stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
+    lyricVideoCaptureStart = null;
+    lyricVideoCaptureEnd = null;
+    clearLyricVideoKeyframes();
 
     const chunks = lyricVideoRecordChunks;
     lyricVideoRecordChunks = [];
@@ -6295,6 +6500,9 @@ function startLyricVideoRecording() {
     stopLyricVideoRecordProgress();
     stopLyricVideoAnimation();
     restoreLyricVideoPlaybackState();
+    lyricVideoCaptureStart = null;
+    lyricVideoCaptureEnd = null;
+    clearLyricVideoKeyframes();
     setLyricVideoSendStatus("error");
   };
 
@@ -6332,6 +6540,28 @@ function startLyricVideoRecording() {
 
     recorder.start();
     audio.play().catch(err => console.error("Lyric video playback:", err));
+
+    // Fade the *recorded* audio in/out across the same padded
+    // lead-in/tail the visuals fade across (see the intro/outro alpha
+    // in drawLyricVideoPreview()) — scheduled once, up front, using
+    // the AudioParam's own clock rather than a JS timer, so it stays
+    // sample-accurate regardless of any main-thread jank during the
+    // rest of the capture. lyricVideoRecordFadeGain only sits in the
+    // path to the recording tap (see ensureLyricVideoStreamDestination()),
+    // so this never touches speaker output.
+    if (lyricVideoRecordFadeGain) {
+      const gain = lyricVideoRecordFadeGain.gain;
+      const now = lyricVideoAudioCtx.currentTime;
+      const totalSeconds = durationMs / 1000;
+      const fadeIn = Math.min(LYRIC_VIDEO_INTRO_PAD_SECONDS, totalSeconds / 2);
+      const fadeOut = Math.min(LYRIC_VIDEO_OUTRO_PAD_SECONDS, totalSeconds / 2);
+
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(0, now);
+      gain.linearRampToValueAtTime(1, now + fadeIn);
+      gain.setValueAtTime(1, now + Math.max(fadeIn, totalSeconds - fadeOut));
+      gain.linearRampToValueAtTime(0, now + totalSeconds);
+    }
 
     // The animation loop (see startLyricVideoAnimation()) only runs
     // for this bounded capture window now, not for as long as the
@@ -6420,6 +6650,9 @@ function cancelLyricVideoRecording() {
   lyricVideoRecordChunks = [];
   stopLyricVideoAnimation();
   restoreLyricVideoPlaybackState();
+  lyricVideoCaptureStart = null;
+  lyricVideoCaptureEnd = null;
+  clearLyricVideoKeyframes();
   setLyricVideoSendStatus("idle");
 }
 
