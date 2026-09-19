@@ -498,24 +498,6 @@
             </div>
           </button>
 
-          <!-- Only shown when synced lyrics exist for the currently
-               loaded song (see openSongActionsMenu()'s
-               #songActionLyricVideo toggling in app.js). -->
-          <button
-            class="library-item hidden"
-            id="songActionLyricVideo"
-          >
-            <div class="library-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="6" width="14" height="12" rx="2.5"></rect>
-                <path d="M17 10l4-2.5v9L17 14"></path>
-              </svg>
-            </div>
-            <div class="library-info">
-              <div class="library-name">Make Lyric Video</div>
-            </div>
-          </button>
-
           <button
             class="library-item destructive"
             id="songActionDelete"
@@ -579,86 +561,6 @@
         <button
           class="secondary-button full-button"
           id="closeQueueModal"
-        >
-          Close
-        </button>
-
-      </div>
-    </div>
-
-    <!-- LYRIC VIDEO MODAL — pick a range of synced lyric lines and
-         preview a static story-style frame for them. See
-         openLyricVideoModal()/drawLyricVideoPreview() in app.js.
-         Stage 1 only: selection + static preview, no recording yet. -->
-    <div
-      class="modal hidden"
-      id="lyricVideoModal"
-    >
-      <div class="modal-card lyric-video-card">
-
-        <h2>Lyric Video</h2>
-
-        <p class="lyric-video-hint">
-          Pick a start and end line for the clip.
-        </p>
-
-        <div class="lyric-video-mode-toggle" id="lyricVideoModeToggle">
-          <button
-            type="button"
-            class="lyric-video-mode-btn active"
-            id="lyricVideoModeStart"
-            data-mode="start"
-          >
-            Set Start
-          </button>
-          <button
-            type="button"
-            class="lyric-video-mode-btn"
-            id="lyricVideoModeEnd"
-            data-mode="end"
-          >
-            Set End
-          </button>
-        </div>
-
-        <div
-          class="lyric-video-lines"
-          id="lyricVideoLinesList"
-        >
-          <div class="empty">No synced lyrics for this song.</div>
-        </div>
-
-        <div class="lyric-video-preview-wrap">
-          <canvas
-            class="lyric-video-preview-canvas"
-            id="lyricVideoCanvas"
-            width="720"
-            height="1280"
-          ></canvas>
-          <div
-            class="lyric-video-preview-empty"
-            id="lyricVideoPreviewEmpty"
-          >
-            Pick a start and end line, then tap Send — the clip is prepared in the background.
-          </div>
-        </div>
-
-        <p
-          class="lyric-video-status"
-          id="lyricVideoStatus"
-        ></p>
-
-        <button
-          class="primary-button full-button"
-          id="lyricVideoSendButton"
-          disabled
-        >
-          Send to Chat
-        </button>
-
-        <button
-          class="secondary-button full-button"
-          id="closeLyricVideoModal"
         >
           Close
         </button>
