@@ -337,6 +337,7 @@ async function init() {
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
+  setupMelodyExtraction();
 
   renderHomeGreeting();
 
@@ -2318,6 +2319,14 @@ function setupModals() {
       const song = selectedSongForMenu;
       closeSongActionsMenu();
       if (song) forwardSong(song);
+    });
+
+  document
+    .getElementById("songActionMelody")
+    .addEventListener("click", () => {
+      const song = selectedSongForMenu;
+      closeSongActionsMenu();
+      if (song) openMelodyModal(song);
     });
 
   document
@@ -5549,6 +5558,718 @@ function handleCoverErrorForContainer(containerId, token, img) {
   if (!container) return;
 
   container.innerHTML = ICONS.music;
+}
+
+/* =========================================================
+   MELODY EXTRACTION (song audio -> downloadable MIDI)
+   -----------------------------------------------------------
+   Opened from the song ⋯ menu ("Extract Melody (MIDI)"). The
+   whole pipeline runs on-device, no server involvement:
+
+     1. Fetch the song's own audio from AUDIO_API (the same
+        endpoint the <audio> element streams from).
+     2. Decode it with the Web Audio API, downmix to mono and
+        resample to 16kHz — plenty for melody-range pitch and
+        far cheaper to analyze than the original file.
+     3. Slide a YIN-style monophonic pitch estimator across the
+        signal in ~12.5ms hops, in batches that yield back to the
+        browser so the progress bar and the rest of the app stay
+        responsive on a long song.
+     4. Turn the frame-by-frame pitch/loudness track into notes
+        (onset, duration, MIDI number, velocity) — a rising-energy
+        onset detector forces a new note even when the pitch holds
+        steady, so repeated notes on the same pitch don't collapse
+        into one long held note.
+     5. Write those notes out as a standard MIDI file (format 0,
+        single track) with a small hand-rolled byte writer — no
+        external library.
+     6. Offer an in-browser preview (plain Web Audio oscillators)
+        and a normal file download.
+
+   This tracks ONE melody line — it is not source separation. On
+   a busy full mix it follows whichever pitch reads loudest at
+   each moment (usually lead vocal/melody, but it can wander on
+   dense instrumental passages) — see the status copy below.
+   ========================================================= */
+
+const MELODY_FRAME_SIZE = 800;      // samples per analysis window (16kHz)
+const MELODY_MAX_TAU = 400;         // ~40Hz floor
+const MELODY_MIN_TAU = 15;          // ~1067Hz ceiling
+const MELODY_HOP = 200;             // ~12.5ms between frames — finer timing
+                                     // than a coarser hop, so short/fast notes
+                                     // and repeated notes have more frames to
+                                     // be caught and separated in.
+const MELODY_YIN_THRESHOLD = 0.18;  // slightly more permissive than the
+                                     // textbook 0.1–0.15 — picks up quieter/
+                                     // breathier voiced frames a stricter
+                                     // threshold would drop as "unvoiced".
+const MELODY_FRAMES_PER_BATCH = 80;
+const MELODY_MAX_SECONDS = 300;     // analyze at most the first 5 minutes
+const MELODY_SILENCE_RMS = 0.005;   // lower floor — keeps quieter melody
+                                     // passages (a vocal sitting under a
+                                     // fuller mix) from being skipped as
+                                     // silence before pitch is even tried.
+const MELODY_ONSET_MIN_RMS = MELODY_SILENCE_RMS * 1.4;
+const MELODY_ONSET_MIN_RISE = 0.012;
+const MELODY_ONSET_MIN_RELATIVE_RISE = 0.5;
+const MELODY_ONSET_REFRACTORY_SECONDS = 0.09;
+
+let melodyState = null;
+
+function setupMelodyExtraction() {
+  document
+    .getElementById("closeMelodyModal")
+    ?.addEventListener("click", closeMelodyModal);
+
+  document
+    .getElementById("melodyPlayButton")
+    ?.addEventListener("click", playMelodyPreview);
+
+  document
+    .getElementById("melodyDownloadButton")
+    ?.addEventListener("click", downloadMelodyMidi);
+}
+
+function openMelodyModal(song) {
+  const modal = document.getElementById("melodyModal");
+  const titleEl = document.getElementById("melodyModalTitle");
+  if (!modal || !titleEl) return;
+
+  stopMelodyPreview();
+
+  // A fresh token per open — lets a still-running extraction from a
+  // just-closed modal notice it's stale and stop touching the DOM.
+  const token = Symbol("melody");
+
+  melodyState = {
+    token,
+    song,
+    notes: null,
+    midiBytes: null,
+    audioCtx: null,
+    playTimer: null,
+    isPlaying: false
+  };
+
+  titleEl.textContent = `Extract Melody — ${song.title || "Song"}`;
+  setMelodyStatus("Downloading audio…");
+  setMelodyProgress(0);
+
+  document.getElementById("melodyRollWrap")?.classList.add("hidden");
+  document.getElementById("melodyError")?.classList.add("hidden");
+
+  const playBtn = document.getElementById("melodyPlayButton");
+  const downloadBtn = document.getElementById("melodyDownloadButton");
+  if (playBtn) {
+    playBtn.disabled = true;
+    playBtn.textContent = "Play Preview";
+  }
+  if (downloadBtn) downloadBtn.disabled = true;
+
+  modal.classList.remove("hidden");
+
+  runMelodyExtraction(song, token);
+}
+
+function closeMelodyModal() {
+  document.getElementById("melodyModal")?.classList.add("hidden");
+  stopMelodyPreview();
+  if (melodyState) melodyState.token = null; // invalidate any run in flight
+}
+
+function setMelodyStatus(text) {
+  const el = document.getElementById("melodyStatus");
+  if (el) el.textContent = text;
+}
+
+function setMelodyProgress(fraction) {
+  const el = document.getElementById("melodyProgressFill");
+  if (el) el.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
+}
+
+function showMelodyError(message) {
+  const el = document.getElementById("melodyError");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove("hidden");
+  setMelodyStatus("Couldn't extract a melody.");
+}
+
+async function runMelodyExtraction(song, token) {
+  try {
+    const arrayBuffer = await fetchSongArrayBuffer(song, fraction => {
+      if (melodyState?.token !== token) return;
+      setMelodyProgress(fraction * 0.25);
+    });
+    if (melodyState?.token !== token) return;
+
+    setMelodyStatus("Decoding audio…");
+    setMelodyProgress(0.28);
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const decodeCtx = new AudioCtx();
+    let decoded;
+    try {
+      decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
+    } finally {
+      decodeCtx.close?.();
+    }
+    if (melodyState?.token !== token) return;
+
+    setMelodyStatus("Preparing signal…");
+    setMelodyProgress(0.35);
+
+    const truncated = decoded.duration > MELODY_MAX_SECONDS;
+    const { samples, sampleRate } = await resampleMono(decoded, 16000);
+    if (melodyState?.token !== token) return;
+
+    setMelodyStatus("Listening for the melody…");
+
+    const { pitchHz, rms, hop } = await trackPitch(
+      samples,
+      sampleRate,
+      fraction => {
+        if (melodyState?.token !== token) return;
+        setMelodyProgress(0.35 + fraction * 0.5);
+      }
+    );
+    if (melodyState?.token !== token) return;
+
+    setMelodyStatus("Writing notes…");
+    setMelodyProgress(0.88);
+
+    const notes = notesFromPitchTrack(pitchHz, rms, hop, sampleRate);
+
+    if (!notes.length) {
+      showMelodyError(
+        "No clear melody line was found in this song — it may be too dense, or mostly percussive, for a single-line extraction."
+      );
+      return;
+    }
+
+    const midiBytes = buildMidiFile(notes);
+
+    setMelodyProgress(1);
+    setMelodyStatus(
+      truncated
+        ? "Done — based on the first 5 minutes of the song."
+        : "Done."
+    );
+
+    melodyState.notes = notes;
+    melodyState.midiBytes = midiBytes;
+
+    const totalDuration =
+      notes[notes.length - 1].start + notes[notes.length - 1].duration;
+
+    const summaryEl = document.getElementById("melodySummary");
+    if (summaryEl) {
+      summaryEl.textContent =
+        `${notes.length} notes · ${formatTime(totalDuration)}`;
+    }
+
+    document.getElementById("melodyRollWrap")?.classList.remove("hidden");
+    drawPianoRoll(
+      document.getElementById("melodyCanvas"),
+      notes,
+      totalDuration
+    );
+
+    const playBtn = document.getElementById("melodyPlayButton");
+    const downloadBtn = document.getElementById("melodyDownloadButton");
+    if (playBtn) playBtn.disabled = false;
+    if (downloadBtn) downloadBtn.disabled = false;
+  } catch (error) {
+    console.error("Melody extraction:", error);
+    if (melodyState?.token === token) {
+      showMelodyError(
+        "Something went wrong while processing this song's audio."
+      );
+    }
+  }
+}
+
+async function fetchSongArrayBuffer(song, onProgress) {
+  const url =
+    `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Audio request failed (${response.status})`);
+  }
+
+  const total = Number(response.headers.get("Content-Length")) || 0;
+
+  if (!response.body || !total) {
+    onProgress?.(1);
+    return await response.arrayBuffer();
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress?.(received / total);
+  }
+
+  const merged = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged.buffer;
+}
+
+async function resampleMono(audioBuffer, targetRate) {
+  const cappedDuration = Math.min(audioBuffer.duration, MELODY_MAX_SECONDS);
+  const length = Math.max(1, Math.ceil(cappedDuration * targetRate));
+
+  const OfflineCtx =
+    window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const offlineCtx = new OfflineCtx(1, length, targetRate);
+
+  const source = offlineCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  // Connecting a multi-channel buffer into this 1-channel context
+  // triggers the browser's standard stereo/mono downmix for us.
+  source.connect(offlineCtx.destination);
+  source.start(0);
+
+  const rendered = await offlineCtx.startRendering();
+  return { samples: rendered.getChannelData(0), sampleRate: targetRate };
+}
+
+async function trackPitch(samples, sampleRate, onProgress) {
+  const hop = MELODY_HOP;
+  const frameCount = Math.max(
+    0,
+    Math.floor((samples.length - MELODY_FRAME_SIZE) / hop)
+  );
+
+  const pitchHz = new Float32Array(frameCount);
+  const rms = new Float32Array(frameCount);
+  const diff = new Float32Array(MELODY_MAX_TAU + 1);
+
+  for (
+    let batchStart = 0;
+    batchStart < frameCount;
+    batchStart += MELODY_FRAMES_PER_BATCH
+  ) {
+    const batchEnd = Math.min(
+      frameCount,
+      batchStart + MELODY_FRAMES_PER_BATCH
+    );
+
+    for (let f = batchStart; f < batchEnd; f++) {
+      const result = yinFrame(samples, f * hop, sampleRate, diff);
+      pitchHz[f] = result.freq;
+      rms[f] = result.energy;
+    }
+
+    onProgress?.(batchEnd / frameCount);
+    // Yield so the progress bar actually paints and a long song
+    // doesn't read as a frozen tab.
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  }
+
+  return { pitchHz, rms, hop };
+}
+
+// One frame of the YIN pitch algorithm: cumulative mean normalized
+// difference function + parabolic interpolation for sub-sample tau.
+function yinFrame(samples, offset, sampleRate, diff) {
+  const W = MELODY_FRAME_SIZE;
+  const maxTau = MELODY_MAX_TAU;
+
+  let energySum = 0;
+  for (let i = 0; i < W; i++) {
+    const s = samples[offset + i] || 0;
+    energySum += s * s;
+  }
+  const rmsValue = Math.sqrt(energySum / W);
+
+  // Skip the expensive difference function on silence/near-silence.
+  if (rmsValue < MELODY_SILENCE_RMS) {
+    return { freq: 0, energy: rmsValue };
+  }
+
+  diff[0] = 1;
+  let runningSum = 0;
+
+  for (let tau = 1; tau <= maxTau; tau++) {
+    let sum = 0;
+    for (let i = 0; i < W; i++) {
+      const d = samples[offset + i] - (samples[offset + i + tau] || 0);
+      sum += d * d;
+    }
+    runningSum += sum;
+    diff[tau] = runningSum === 0 ? 1 : (sum * tau) / runningSum;
+  }
+
+  let tauEstimate = -1;
+  for (let tau = MELODY_MIN_TAU; tau <= maxTau; tau++) {
+    if (diff[tau] < MELODY_YIN_THRESHOLD) {
+      while (tau + 1 <= maxTau && diff[tau + 1] < diff[tau]) tau++;
+      tauEstimate = tau;
+      break;
+    }
+  }
+
+  if (tauEstimate === -1) {
+    return { freq: 0, energy: rmsValue };
+  }
+
+  let betterTau = tauEstimate;
+  const x0 = tauEstimate > 1 ? tauEstimate - 1 : tauEstimate;
+  const x2 = tauEstimate < maxTau ? tauEstimate + 1 : tauEstimate;
+  if (x0 !== tauEstimate && x2 !== tauEstimate) {
+    const s0 = diff[x0], s1 = diff[tauEstimate], s2 = diff[x2];
+    const denom = 2 * (2 * s1 - s2 - s0);
+    if (denom !== 0) betterTau = tauEstimate + (s2 - s0) / denom;
+  }
+
+  return { freq: sampleRate / betterTau, energy: rmsValue };
+}
+
+// Rising-energy onsets — a plain "did loudness jump" flux detector.
+// Two consecutive same-pitch notes (a repeated note, very common in
+// real melodies) would otherwise read as one long held note, since
+// the segmentation below only splits on a pitch or silence change.
+// Forcing a split at each detected onset is what lets those show up
+// as separate notes.
+function detectOnsets(rms, frameSeconds) {
+  const onsets = new Uint8Array(rms.length);
+  const refractoryFrames = Math.max(
+    1,
+    Math.round(MELODY_ONSET_REFRACTORY_SECONDS / frameSeconds)
+  );
+  let lastOnset = -Infinity;
+
+  for (let i = 2; i < rms.length; i++) {
+    const prev = rms[i - 2];
+    const rise = rms[i] - prev;
+    const relativeRise = prev > 0.0005 ? rise / prev : rise / 0.0005;
+
+    if (
+      rms[i] > MELODY_ONSET_MIN_RMS &&
+      rise > MELODY_ONSET_MIN_RISE &&
+      relativeRise > MELODY_ONSET_MIN_RELATIVE_RISE &&
+      i - lastOnset >= refractoryFrames
+    ) {
+      onsets[i] = 1;
+      lastOnset = i;
+    }
+  }
+
+  return onsets;
+}
+
+function notesFromPitchTrack(pitchHz, rms, hop, sampleRate) {
+  const frameCount = pitchHz.length;
+  const frameSeconds = hop / sampleRate;
+
+  const rawNotes = new Float32Array(frameCount);
+  for (let i = 0; i < frameCount; i++) {
+    rawNotes[i] = pitchHz[i] > 0 ? freqToMidi(pitchHz[i]) : -1;
+  }
+
+  const onsets = detectOnsets(rms, frameSeconds);
+
+  // Short median filter over the frame-level note numbers — shakes
+  // out single-frame octave jumps / detector jitter before we group
+  // frames into notes.
+  const filtered = new Int16Array(frameCount);
+  const win = 7;
+  const half = Math.floor(win / 2);
+  const buf = [];
+  for (let i = 0; i < frameCount; i++) {
+    buf.length = 0;
+    for (let k = -half; k <= half; k++) {
+      const idx = i + k;
+      if (idx >= 0 && idx < frameCount && rawNotes[idx] >= 0) {
+        buf.push(Math.round(rawNotes[idx]));
+      }
+    }
+    if (!buf.length) {
+      filtered[i] = -1;
+      continue;
+    }
+    buf.sort((a, b) => a - b);
+    filtered[i] = buf[Math.floor(buf.length / 2)];
+  }
+
+  const notes = [];
+  const minNoteFrames = Math.max(2, Math.round(0.055 / frameSeconds));
+  const maxGapFrames = Math.max(1, Math.round(0.06 / frameSeconds));
+
+  let i = 0;
+  while (i < frameCount) {
+    if (filtered[i] < 0) {
+      i++;
+      continue;
+    }
+
+    const noteNumber = filtered[i];
+    let start = i;
+    let end = i;
+    let gap = 0;
+    let j = i + 1;
+
+    while (j < frameCount) {
+      // A fresh onset mid-run forces a new note even though the
+      // pitch hasn't changed — see detectOnsets() above.
+      if (onsets[j] && j > start) break;
+
+      if (filtered[j] === noteNumber) {
+        end = j;
+        gap = 0;
+        j++;
+      } else if (filtered[j] < 0 && gap < maxGapFrames) {
+        gap++;
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    const frameSpan = end - start + 1;
+    if (frameSpan >= minNoteFrames) {
+      let energySum = 0, energyCount = 0;
+      for (let k = start; k <= end; k++) {
+        if (rms[k]) {
+          energySum += rms[k];
+          energyCount++;
+        }
+      }
+      const avgRms = energyCount ? energySum / energyCount : 0.02;
+
+      notes.push({
+        midi: Math.max(24, Math.min(103, noteNumber)),
+        start: start * frameSeconds,
+        duration: frameSpan * frameSeconds,
+        velocity: Math.max(35, Math.min(115, Math.round(avgRms * 900)))
+      });
+    }
+
+    i = j;
+  }
+
+  return notes;
+}
+
+function freqToMidi(freq) {
+  return 69 + 12 * Math.log2(freq / 440);
+}
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function buildMidiFile(notes) {
+  const ticksPerQuarter = 480;
+  const microsecondsPerQuarter = 500000; // 120 BPM reference tempo
+  const ticksPerSecond = ticksPerQuarter / (microsecondsPerQuarter / 1e6);
+
+  const events = [];
+  for (const note of notes) {
+    const startTick = Math.round(note.start * ticksPerSecond);
+    const endTick = Math.round((note.start + note.duration) * ticksPerSecond);
+    events.push({ tick: startTick, type: "on", note: note.midi, velocity: note.velocity });
+    events.push({
+      tick: Math.max(startTick + 1, endTick),
+      type: "off",
+      note: note.midi
+    });
+  }
+  events.sort((a, b) => a.tick - b.tick || (a.type === "off" ? -1 : 1));
+
+  const trackBytes = [];
+  let lastTick = 0;
+
+  writeVarLen(trackBytes, 0);
+  trackBytes.push(
+    0xff, 0x51, 0x03,
+    (microsecondsPerQuarter >> 16) & 0xff,
+    (microsecondsPerQuarter >> 8) & 0xff,
+    microsecondsPerQuarter & 0xff
+  );
+
+  for (const ev of events) {
+    writeVarLen(trackBytes, Math.max(0, ev.tick - lastTick));
+    lastTick = ev.tick;
+
+    if (ev.type === "on") {
+      trackBytes.push(0x90, ev.note & 0x7f, ev.velocity & 0x7f);
+    } else {
+      trackBytes.push(0x80, ev.note & 0x7f, 0x40);
+    }
+  }
+
+  writeVarLen(trackBytes, 0);
+  trackBytes.push(0xff, 0x2f, 0x00);
+
+  const header = [
+    0x4d, 0x54, 0x68, 0x64,
+    0x00, 0x00, 0x00, 0x06,
+    0x00, 0x00,
+    0x00, 0x01,
+    (ticksPerQuarter >> 8) & 0xff, ticksPerQuarter & 0xff
+  ];
+
+  const trackHeader = [
+    0x4d, 0x54, 0x72, 0x6b,
+    (trackBytes.length >>> 24) & 0xff,
+    (trackBytes.length >>> 16) & 0xff,
+    (trackBytes.length >>> 8) & 0xff,
+    trackBytes.length & 0xff
+  ];
+
+  return new Uint8Array([...header, ...trackHeader, ...trackBytes]);
+}
+
+// Standard MIDI variable-length quantity encoding.
+function writeVarLen(bytes, value) {
+  const chunks = [value & 0x7f];
+  value = Math.floor(value / 128);
+  while (value > 0) {
+    chunks.push((value & 0x7f) | 0x80);
+    value = Math.floor(value / 128);
+  }
+  for (let i = chunks.length - 1; i >= 0; i--) bytes.push(chunks[i]);
+}
+
+function drawPianoRoll(canvas, notes, totalDuration) {
+  if (!canvas || !notes.length || !totalDuration) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const displayWidth = canvas.clientWidth || 320;
+  const displayHeight = 120;
+
+  canvas.width = displayWidth * dpr;
+  canvas.height = displayHeight * dpr;
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+  let minMidi = 127, maxMidi = 0;
+  for (const n of notes) {
+    minMidi = Math.min(minMidi, n.midi);
+    maxMidi = Math.max(maxMidi, n.midi);
+  }
+  minMidi -= 2;
+  maxMidi += 2;
+  const range = Math.max(1, maxMidi - minMidi);
+
+  const accent =
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent")
+      .trim() || "#ffffff";
+
+  ctx.fillStyle = accent;
+
+  for (const n of notes) {
+    const x = (n.start / totalDuration) * displayWidth;
+    const w = Math.max(1.5, (n.duration / totalDuration) * displayWidth - 1);
+    const y = displayHeight - ((n.midi - minMidi) / range) * displayHeight;
+
+    ctx.globalAlpha = Math.max(0.35, Math.min(1, n.velocity / 100));
+    ctx.fillRect(x, y - 1.5, w, 3);
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+function playMelodyPreview() {
+  if (!melodyState?.notes?.length) return;
+
+  if (melodyState.isPlaying) {
+    stopMelodyPreview();
+    return;
+  }
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  melodyState.audioCtx = ctx;
+  melodyState.isPlaying = true;
+
+  const playBtn = document.getElementById("melodyPlayButton");
+  if (playBtn) playBtn.textContent = "Stop Preview";
+
+  const startAt = ctx.currentTime + 0.1;
+  const master = ctx.createGain();
+  master.gain.value = 0.28;
+  master.connect(ctx.destination);
+
+  for (const note of melodyState.notes) {
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = midiToFreq(note.midi);
+
+    const gain = ctx.createGain();
+    const start = startAt + note.start;
+    const end = start + Math.max(0.05, note.duration);
+
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(1, start + 0.015);
+    gain.gain.setValueAtTime(1, Math.max(start + 0.015, end - 0.03));
+    gain.gain.linearRampToValueAtTime(0, end);
+
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(start);
+    osc.stop(end + 0.02);
+  }
+
+  const lastNote = melodyState.notes[melodyState.notes.length - 1];
+  const totalDuration = lastNote.start + lastNote.duration;
+
+  melodyState.playTimer = setTimeout(
+    stopMelodyPreview,
+    (totalDuration + 0.3) * 1000
+  );
+}
+
+function stopMelodyPreview() {
+  if (melodyState?.playTimer) {
+    clearTimeout(melodyState.playTimer);
+    melodyState.playTimer = null;
+  }
+  if (melodyState?.audioCtx) {
+    melodyState.audioCtx.close?.();
+    melodyState.audioCtx = null;
+  }
+  if (melodyState) melodyState.isPlaying = false;
+
+  const playBtn = document.getElementById("melodyPlayButton");
+  if (playBtn && !playBtn.disabled) playBtn.textContent = "Play Preview";
+}
+
+function downloadMelodyMidi() {
+  if (!melodyState?.midiBytes) return;
+
+  const blob = new Blob([melodyState.midiBytes], { type: "audio/midi" });
+  const url = URL.createObjectURL(blob);
+
+  const safeTitle =
+    (melodyState.song?.title || "melody")
+      .replace(/[\\/:*?"<>|]+/g, " ")
+      .trim() || "melody";
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${safeTitle}.mid`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 
