@@ -1062,10 +1062,11 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   display: flex; align-items: center; justify-content: center;
   flex: 0 0 46px;
   position: relative; z-index: 2;
-  transition: opacity var(--dur-fast) var(--ease);
+  transition: none;
 }
-/* Press feedback is opacity-only: no scale/translate, so the button
-   never changes size or position, not even while a finger is on it. */
+/* Press feedback is an instant opacity change: no transition, no
+   scale/translate, so the button never changes size or position,
+   not even while a finger is on it. */
 .mini-like:active, .mini-play:active { opacity: .6; }
 .mini-like svg { width: 20px; height: 20px; }
 .mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
@@ -1153,9 +1154,9 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   display: flex; align-items: center; justify-content: center;
   color: #888;
   transform: translateX(-8px);
-  transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
+  transition: none;
 }
-.player-close:active { transform: translateX(-8px) scale(.9); color: #fff; }
+.player-close:active { transform: translateX(-8px); color: #fff; }
 .player-close svg { width: 21px; height: 21px; }
 
 .player-top-actions {
@@ -1169,10 +1170,10 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
-  transition: transform var(--dur-fast) var(--ease), color var(--dur) var(--ease);
+  transition: none;
 }
 .player-menu-btn svg { width: 20px; height: 20px; }
-.player-menu-btn:active { transform: scale(.9); color: #fff; }
+.player-menu-btn:active { color: #fff; }
 
 .player-cover {
   width: min(90vw, 340px, calc(var(--app-vh, 100dvh) * 0.28));
@@ -1472,12 +1473,12 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #fff;
   opacity: 1 !important;
   visibility: visible !important;
-  transition: opacity var(--dur-fast) var(--ease);
+  transition: none !important;
 }
-/* Press feedback is opacity-only (no scale/translate) so a control's
-   box never resizes or moves. The !important is needed to beat the
-   `opacity: 1 !important` guard above; the higher specificity of
-   :active is what lets it win. */
+/* Press feedback is an instant opacity change (no transition, no
+   scale/translate) so a control's box never resizes or moves. The
+   !important is needed to beat the `opacity: 1 !important` guard
+   above; the higher specificity of :active is what lets it win. */
 .player-controls button:active { opacity: .6 !important; }
 
 .player-controls button svg {
@@ -1552,7 +1553,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 
 .library-item:active, .back-button:active, .nav-item:active,
-.player-close:active, .song-actions button:active {
+.song-actions button:active {
   transform: scale(.96);
 }
 
@@ -1788,4 +1789,127 @@ button:focus-visible,
 input:focus-visible {
   outline: 2px solid rgba(255, 255, 255, .55);
   outline-offset: 2px;
+}
+
+/* =========================================================
+   STATIC PLAYER CONTROLS — final override, keep LAST in file.
+
+   Covers every button in the full player (shuffle/repeat,
+   previous, play/pause, next, favorite, close, up-next, track
+   options) and the mini player (favorite, play/pause), plus all
+   of their icons and icon shapes.
+
+   Goal: a tap changes a control's colour/opacity/icon INSTANTLY
+   and nothing ever moves or resizes, even by a pixel.
+
+   - No transitions, animations, scale, rotate, or translate on
+     any control or icon, in any state (default, :active, .active,
+     .is-pause, [aria-pressed]).
+   - Fixed button boxes and fixed icon boxes, so swapping the icon
+     (play<->pause, heart<->filled heart, shuffle<->repeat) or its
+     fill/stroke can't change layout.
+   - The only transforms left are the two STATIC alignment offsets
+     (.player-close / .player-top-actions), pinned so no state can
+     alter them.
+   ========================================================= */
+
+/* 1. Kill every transition / animation / transform channel. */
+.player-controls button, .player-controls button *,
+.mini-like, .mini-like *, .mini-play, .mini-play *,
+.player-close, .player-close *,
+.player-menu-btn, .player-menu-btn *,
+.player-top-actions {
+  transition: none !important;
+  animation: none !important;
+  will-change: auto !important;
+  scale: none !important;
+  rotate: none !important;
+  translate: none !important;
+}
+
+.player-controls button, .player-controls button *,
+.mini-like, .mini-like *, .mini-play, .mini-play *,
+.player-close *, .player-menu-btn, .player-menu-btn * {
+  transform: none !important;
+}
+
+/* The two static alignment offsets — identical in every state. */
+.player-close,
+.player-close:hover, .player-close:active, .player-close:focus,
+.player-close:focus-visible {
+  transform: translateX(-8px) !important;
+}
+.player-top-actions { transform: translateX(8px) !important; }
+
+/* 2. Fixed button boxes. */
+.player-controls button {
+  box-sizing: border-box !important;
+  width: 44px !important; min-width: 44px !important; max-width: 44px !important;
+  height: 44px !important; min-height: 44px !important; max-height: 44px !important;
+  flex: 0 0 44px !important;
+  margin: 0 !important; padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
+}
+.player-controls .main-play {
+  width: 68px !important; min-width: 68px !important; max-width: 68px !important;
+  height: 68px !important; min-height: 68px !important; max-height: 68px !important;
+  flex: 0 0 68px !important;
+}
+
+.mini-like, .mini-play {
+  box-sizing: border-box !important;
+  width: 46px !important; min-width: 46px !important; max-width: 46px !important;
+  height: 46px !important; min-height: 46px !important; max-height: 46px !important;
+  flex: 0 0 46px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
+}
+
+.player-close, .player-menu-btn {
+  box-sizing: border-box !important;
+  width: 40px !important; min-width: 40px !important; max-width: 40px !important;
+  height: 40px !important; min-height: 40px !important; max-height: 40px !important;
+  flex: 0 0 40px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
+}
+
+/* 3. Fixed icon boxes, always centred, never offset by state. */
+.player-controls button svg,
+.mini-like svg, .mini-play svg,
+.player-close svg, .player-menu-btn svg {
+  display: block !important;
+  flex: none !important;
+  position: static !important;
+  margin: 0 !important; padding: 0 !important;
+}
+.player-controls button svg {
+  width: 26px !important; min-width: 26px !important; max-width: 26px !important;
+  height: 26px !important; min-height: 26px !important; max-height: 26px !important;
+}
+.player-controls .main-play svg {
+  width: 32px !important; min-width: 32px !important; max-width: 32px !important;
+  height: 32px !important; min-height: 32px !important; max-height: 32px !important;
+}
+.mini-like svg, .mini-play svg {
+  width: 20px !important; min-width: 20px !important; max-width: 20px !important;
+  height: 20px !important; min-height: 20px !important; max-height: 20px !important;
+}
+.player-close svg {
+  width: 21px !important; min-width: 21px !important; max-width: 21px !important;
+  height: 21px !important; min-height: 21px !important; max-height: 21px !important;
+}
+.player-menu-btn svg {
+  width: 20px !important; min-width: 20px !important; max-width: 20px !important;
+  height: 20px !important; min-height: 20px !important; max-height: 20px !important;
+}
+
+/* 4. Same stroke weight in every state, so filling the heart or
+      toggling repeat/shuffle can't grow or shrink the icon's edge. */
+#playerLike svg, #playerLike.active svg,
+.mini-like svg, .mini-like.active svg {
+  stroke-width: 2 !important;
 }
