@@ -5584,7 +5584,10 @@ function handleCoverErrorForContainer(containerId, token, img) {
         single track) with a small hand-rolled byte writer — no
         external library.
      6. Offer an in-browser preview (plain Web Audio oscillators)
-        and a normal file download.
+        and, since an in-WebView blob download isn't reliable inside
+        Telegram, send the finished file to the user as a normal
+        Telegram document (POST /melody/send) instead of trying to
+        trigger a download in the page.
 
    This tracks ONE melody line — it is not source separation. On
    a busy full mix it follows whichever pitch reads loudest at
@@ -5626,8 +5629,8 @@ function setupMelodyExtraction() {
     ?.addEventListener("click", playMelodyPreview);
 
   document
-    .getElementById("melodyDownloadButton")
-    ?.addEventListener("click", downloadMelodyMidi);
+    .getElementById("melodySendButton")
+    ?.addEventListener("click", sendMelodyMidiToTelegram);
 }
 
 function openMelodyModal(song) {
@@ -5659,7 +5662,7 @@ function openMelodyModal(song) {
   document.getElementById("melodyError")?.classList.add("hidden");
 
   const playBtn = document.getElementById("melodyPlayButton");
-  const downloadBtn = document.getElementById("melodyDownloadButton");
+  const downloadBtn = document.getElementById("melodySendButton");
   if (playBtn) {
     playBtn.disabled = true;
     playBtn.textContent = "Play Preview";
@@ -5776,7 +5779,7 @@ async function runMelodyExtraction(song, token) {
     );
 
     const playBtn = document.getElementById("melodyPlayButton");
-    const downloadBtn = document.getElementById("melodyDownloadButton");
+    const downloadBtn = document.getElementById("melodySendButton");
     if (playBtn) playBtn.disabled = false;
     if (downloadBtn) downloadBtn.disabled = false;
   } catch (error) {
@@ -6251,25 +6254,64 @@ function stopMelodyPreview() {
   if (playBtn && !playBtn.disabled) playBtn.textContent = "Play Preview";
 }
 
-function downloadMelodyMidi() {
-  if (!melodyState?.midiBytes) return;
+// Telegram's in-app WebView doesn't reliably support a client-side
+// blob download — it can try to hand the blob: URL off to the
+// system browser, which has no access to it, and that failed
+// hand-off is what was blanking the Mini App on tap. So instead of
+// triggering a download in the page, the generated MIDI bytes go to
+// the Worker (see /melody/send) which forwards them to the user as
+// a normal Telegram document — the exact channel "Forward" already
+// uses for songs. The file ends up in the user's chat with the bot,
+// where Telegram's own, reliable file handling takes over.
+function bytesToBase64(bytes) {
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + chunkSize)
+    );
+  }
+  return btoa(binary);
+}
 
-  const blob = new Blob([melodyState.midiBytes], { type: "audio/midi" });
-  const url = URL.createObjectURL(blob);
+async function sendMelodyMidiToTelegram() {
+  if (!melodyState?.midiBytes || !melodyState.song) return;
+
+  const sendBtn = document.getElementById("melodySendButton");
+  const originalLabel = sendBtn ? sendBtn.textContent : "Send to Telegram";
+
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending…";
+  }
 
   const safeTitle =
-    (melodyState.song?.title || "melody")
+    (melodyState.song.title || "melody")
       .replace(/[\\/:*?"<>|]+/g, " ")
       .trim() || "melody";
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${safeTitle}.mid`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  try {
+    await api("/melody/send", {
+      method: "POST",
+      body: JSON.stringify({
+        song_id: melodyState.song.id,
+        filename: `${safeTitle}.mid`,
+        data_base64: bytesToBase64(melodyState.midiBytes)
+      })
+    });
 
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setMelodyStatus("Sent — check your Telegram chat with the bot.");
+  } catch (error) {
+    console.error("Melody send:", error);
+    setMelodyStatus("Couldn't send the file — try again.");
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = originalLabel;
+    }
+  }
 }
+
 
 
