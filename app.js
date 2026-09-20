@@ -5568,8 +5568,10 @@ function handleCoverErrorForContainer(containerId, token, img) {
 
      1. Fetch the song's own audio from AUDIO_API (the same
         endpoint the <audio> element streams from).
-     2. Decode it with the Web Audio API at 22050Hz (what the
-        model expects; stereo is fine — it downmixes internally).
+     2. Decode it with the Web Audio API (stereo is fine — Basic
+        Pitch downmixes and resamples to 22050Hz internally, so the
+        AudioContext here is left at its default rate rather than
+        forced to match).
      3. Run it through Basic Pitch (Spotify's small, Apache-2.0
         licensed polyphonic note-transcription model, loaded as a
         real ES module — see the <script type="module"> near the
@@ -5689,7 +5691,13 @@ function showMelodyError(message) {
 }
 
 async function runMelodyExtraction(song, token) {
+  // Tracks which phase failed, purely for the error message — the
+  // person testing this has no devtools on a phone, so this plus
+  // the raw error text is the only diagnostic we get.
+  let stage = "starting";
+
   try {
+    stage = "downloading audio";
     const arrayBuffer = await fetchSongArrayBuffer(song, fraction => {
       if (melodyState?.token !== token) return;
       setMelodyProgress(fraction * 0.15);
@@ -5699,6 +5707,7 @@ async function runMelodyExtraction(song, token) {
     setMelodyStatus("Loading the transcription model…");
     setMelodyProgress(0.17);
 
+    stage = "loading the transcription model";
     const basicPitch = await (window.__basicPitchReady || Promise.resolve(null));
     if (!basicPitch) {
       // window.__basicPitchError (set in index.html) carries the
@@ -5717,9 +5726,15 @@ async function runMelodyExtraction(song, token) {
     setMelodyStatus("Decoding audio…");
     setMelodyProgress(0.22);
 
+    stage = "decoding audio";
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    // 22050Hz is what Basic Pitch expects its input decoded at.
-    const decodeCtx = new AudioCtx({ sampleRate: 22050 });
+    // Basic Pitch resamples internally to 22050Hz regardless of the
+    // input's rate (per its own docs), so the AudioContext here is
+    // left at its default rate rather than forced to 22050 — some
+    // WebKit/iOS WebViews are unreliable with a non-default
+    // AudioContext sampleRate, which was the likely cause of this
+    // stage failing on iOS Telegram.
+    const decodeCtx = new AudioCtx();
     let decoded;
     try {
       decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
@@ -5728,12 +5743,14 @@ async function runMelodyExtraction(song, token) {
     }
     if (melodyState?.token !== token) return;
 
+    stage = "trimming audio";
     const { buffer: analysisBuffer, truncated } =
       capAudioBufferDuration(decoded, MELODY_MAX_SECONDS);
 
     setMelodyStatus("Transcribing piano, bass and other instruments…");
     setMelodyProgress(0.27);
 
+    stage = "transcribing (evaluateModel)";
     const frames = [];
     const onsets = [];
     const contours = [];
@@ -5755,6 +5772,7 @@ async function runMelodyExtraction(song, token) {
     setMelodyStatus("Filtering out vocals, writing notes…");
     setMelodyProgress(0.9);
 
+    stage = "converting model output to notes";
     const { BasicPitch } = basicPitch;
     const rawNotes = BasicPitch.noteFramesToTime(
       BasicPitch.addPitchBendsToNoteEvents(
@@ -5778,6 +5796,7 @@ async function runMelodyExtraction(song, token) {
       return;
     }
 
+    stage = "writing the MIDI file";
     const midiBytes = buildMidiFile(notes);
 
     setMelodyProgress(1);
@@ -5811,10 +5830,11 @@ async function runMelodyExtraction(song, token) {
     if (playBtn) playBtn.disabled = false;
     if (downloadBtn) downloadBtn.disabled = false;
   } catch (error) {
-    console.error("Melody extraction:", error);
+    console.error(`Melody extraction (${stage}):`, error);
     if (melodyState?.token === token) {
+      const detail = error?.message || error?.name || String(error);
       showMelodyError(
-        "Something went wrong while processing this song's audio."
+        `Something went wrong while ${stage} (${detail}).`
       );
     }
   }
