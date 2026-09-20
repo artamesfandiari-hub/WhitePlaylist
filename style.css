@@ -1062,17 +1062,19 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   display: flex; align-items: center; justify-content: center;
   flex: 0 0 46px;
   position: relative; z-index: 2;
-  transition: transform var(--dur-fast) var(--ease);
+  transition: opacity var(--dur-fast) var(--ease);
 }
-.mini-like:active, .mini-play:active { transform: scale(.9); }
+/* Press feedback is opacity-only: no scale/translate, so the button
+   never changes size or position, not even while a finger is on it. */
+.mini-like:active, .mini-play:active { opacity: .6; }
 .mini-like svg { width: 20px; height: 20px; }
 .mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
-.mini-play svg { width: 20px; height: 20px; margin-left: 2px; fill: currentColor; stroke: none; }
-/* Same optical-centering fix as .continue-play/.smart-mix-play:
-   the play triangle's margin-left nudges it into the visual center
-   of the circle; drop that nudge once the icon swaps to the
-   (already symmetric) pause bars. */
-.mini-play.is-pause svg { margin-left: 0; }
+/* No state-dependent margin on the icon: the play triangle and the
+   pause bars now sit in exactly the same centered 20x20 box, so
+   toggling play/pause can never nudge the icon sideways. (The path
+   itself is already optically centered: its centroid is ~x=11.7 of
+   a 24-wide viewBox.) */
+.mini-play svg { width: 20px; height: 20px; fill: currentColor; stroke: none; }
 
 /* FULL PLAYER */
 .player-overlay {
@@ -1470,9 +1472,13 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #fff;
   opacity: 1 !important;
   visibility: visible !important;
-  transition: transform var(--dur-fast) var(--ease);
+  transition: opacity var(--dur-fast) var(--ease);
 }
-.player-controls button:active { transform: scale(.9); }
+/* Press feedback is opacity-only (no scale/translate) so a control's
+   box never resizes or moves. The !important is needed to beat the
+   `opacity: 1 !important` guard above; the higher specificity of
+   :active is what lets it win. */
+.player-controls button:active { opacity: .6 !important; }
 
 .player-controls button svg {
   width: 26px !important; height: 26px !important;
@@ -1493,13 +1499,13 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #000;
   box-shadow: 0 10px 26px rgba(255, 255, 255, .18);
 }
-.player-controls .main-play:active { transform: scale(.94); }
+.player-controls .main-play:active { opacity: .85 !important; }
 .player-controls .main-play svg { width: 32px !important; height: 32px !important; fill: #000; stroke: none; }
 
 #shuffleButton, #previousButton, #nextButton, #playerLike { color: #fff; }
 
 #shuffleButton { color: #777 !important; }
-#shuffleButton.active { color: #fff !important; transform: scale(1.04); }
+#shuffleButton.active { color: #fff !important; }
 
 #playerLike.active, .mini-like.active { color: #fff !important; }
 #playerLike.active svg, .mini-like.active svg { fill: currentColor !important; stroke: currentColor !important; }
@@ -1546,7 +1552,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 
 .library-item:active, .back-button:active, .nav-item:active,
-.player-close:active, .song-actions button:active, .player-controls button:active {
+.player-close:active, .song-actions button:active {
   transform: scale(.96);
 }
 
