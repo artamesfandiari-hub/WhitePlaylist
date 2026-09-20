@@ -1099,6 +1099,8 @@ async function bulkDeleteSongs(ids) {
       ids.map(id => api(`/songs/${id}`, { method: "DELETE" }))
     );
 
+    audioCacheRemove(ids);
+
     if (
       state.currentSong &&
       ids.includes(Number(state.currentSong.id))
@@ -2095,6 +2097,8 @@ async function deleteSong(song) {
       method: "DELETE"
     });
 
+    audioCacheRemove(song.id);
+
     if (
       state.currentSong &&
       Number(state.currentSong.id) === Number(song.id)
@@ -2134,6 +2138,8 @@ async function deleteAllSongs() {
     await api("/songs", {
       method: "DELETE"
     });
+
+    audioCacheClear();
 
     audio.pause();
     audio.removeAttribute("src");
@@ -2573,6 +2579,632 @@ async function openAddToPlaylist(songOrIds) {
    ========================================================= */
 
 /* =========================================================
+   AUDIO CACHE (offline playback)
+   ----------------------------------------------------------------
+   Keeps a copy of songs on the device so a song that has already
+   been fetched once plays from local storage next time — no
+   download from the API/Worker, and it keeps working with no
+   internet at all.
+
+   Storage: IndexedDB (never localStorage — audio files are far too
+   big for it). Two object stores, both keyed by song id, written in
+   ONE transaction so an entry is either complete or absent:
+     - "blobs": the audio file itself (a Blob, only ever written
+       after the whole file was received and verified)
+     - "meta":  a tiny record per song {id, size, type, fileSize,
+       savedAt, lastUsed}. This is all the eviction logic reads, and
+       all of it is mirrored in audioCacheIndex (in memory), so
+       "is this song cached?" is a synchronous check that never
+       touches the disk.
+
+   Cache key = song id. `fileSize` (the song's file_size from the
+   API) is stored as the version: if the library later reports a
+   different size for the same id (file replaced), the old copy is
+   treated as stale and dropped instead of being played.
+
+   When it is written:  a song being streamed is downloaded once in
+     full (one plain GET, low priority, no Range) a few seconds
+     after it starts playing, and stored only if the response was a
+     complete 200 whose byte count matches Content-Length. The
+     waveform generator needs that same full file, so it shares this
+     one download (audioCacheEnsure) instead of fetching it again.
+   When it is read:     startPlayback() / retryPlaybackFromError() /
+     the waveform loader, always BEFORE any network request for that
+     song's audio.
+   When it is removed:  oldest-used first when the size limit is
+     reached, when the song is deleted, when the file's version
+     changes, or when a cached copy turns out to be unreadable.
+   ========================================================= */
+
+// Upper bound for everything stored. Also capped to a share of what
+// the browser says the origin's quota is (see audioCacheInit()), so
+// a small device never gets filled up.
+const AUDIO_CACHE_MAX_BYTES = 300 * 1024 * 1024;
+const AUDIO_CACHE_QUOTA_SHARE = 0.25;
+
+// Never write if that would leave less than this free on the origin.
+const AUDIO_CACHE_FREE_MARGIN_BYTES = 50 * 1024 * 1024;
+
+// Leave the live stream a head start, and don't spend data caching a
+// song the user skips straight past.
+const AUDIO_CACHE_START_DELAY_MS = 5000;
+
+// A rebuffer shorter than this (e.g. a normal seek) doesn't cancel a
+// cache download; a longer one is a real stall and hands all the
+// bandwidth back to playback.
+const AUDIO_CACHE_STALL_ABORT_MS = 2000;
+
+// Per song, per session: a download that keeps getting cut off on a
+// bad connection stops retrying instead of re-downloading forever.
+const AUDIO_CACHE_MAX_ATTEMPTS = 2;
+
+// If reading a cached file stalls, play from the network instead.
+const AUDIO_CACHE_READ_TIMEOUT_MS = 2000;
+
+let audioCacheDbPromise = null;
+let audioCacheReady = false;
+let audioCacheLimit = AUDIO_CACHE_MAX_BYTES;
+
+// song id -> { id, size, type, fileSize, savedAt, lastUsed }
+const audioCacheIndex = new Map();
+
+// song id -> { controller, promise } for full downloads in progress
+const audioCacheInflight = new Map();
+const audioCacheAttempts = new Map();
+
+let audioCacheStartTimer = null;
+let audioCacheStallTimer = null;
+
+// The blob: URL currently loaded into <audio> (when playing a cached
+// copy) and which song it belongs to.
+let audioObjectUrl = null;
+let audioObjectSongId = null;
+
+// Bumped by every startPlayback() so a slow cache read for a song the
+// user has since skipped can never override the song now playing.
+let audioLoadToken = 0;
+
+function audioCacheSupported() {
+  return (
+    typeof indexedDB !== "undefined" &&
+    typeof URL !== "undefined" &&
+    typeof URL.createObjectURL === "function"
+  );
+}
+
+function audioNetworkUrl(song) {
+  return `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+}
+
+function audioCacheOpenDb() {
+  if (audioCacheDbPromise) return audioCacheDbPromise;
+
+  audioCacheDbPromise = new Promise(resolve => {
+    if (typeof indexedDB === "undefined") {
+      resolve(null);
+      return;
+    }
+
+    let request;
+    try {
+      request = indexedDB.open("wp-audio-cache", 1);
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("meta")) {
+        db.createObjectStore("meta", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("blobs")) {
+        db.createObjectStore("blobs");
+      }
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        audioCacheDbPromise = null;
+      };
+      resolve(db);
+    };
+
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+
+  return audioCacheDbPromise;
+}
+
+// Runs `work(tx)` in one transaction. Resolves when the transaction
+// has fully committed (with whatever `work` returned — or, if that's
+// a function, what it returns once the transaction is done), rejects
+// if it errors/aborts. Nothing is kept unless the whole thing commits.
+function audioCacheTx(db, stores, mode, work) {
+  return new Promise((resolve, reject) => {
+    let result;
+    let tx;
+
+    try {
+      tx = db.transaction(stores, mode);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    tx.oncomplete = () =>
+      resolve(typeof result === "function" ? result() : result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Transaction aborted"));
+
+    try {
+      result = work(tx);
+    } catch (error) {
+      try { tx.abort(); } catch (_) {}
+      reject(error);
+    }
+  });
+}
+
+async function audioCacheInit() {
+  if (audioCacheReady || !audioCacheSupported()) return;
+
+  // Listeners first (cheap, and harmless while the cache isn't ready:
+  // every path below re-checks audioCacheReady before doing anything).
+  audio.addEventListener("playing", () => {
+    if (audioCacheStallTimer) {
+      clearTimeout(audioCacheStallTimer);
+      audioCacheStallTimer = null;
+    }
+    audioCacheScheduleDownload();
+  });
+
+  audio.addEventListener("waiting", () => {
+    if (!audioCacheInflight.size) return;
+    if (audioCacheStallTimer) clearTimeout(audioCacheStallTimer);
+    audioCacheStallTimer = setTimeout(() => {
+      audioCacheStallTimer = null;
+      audioCacheAbortDownloads();
+    }, AUDIO_CACHE_STALL_ABORT_MS);
+  });
+
+  try {
+    const db = await audioCacheOpenDb();
+    if (!db) return;
+
+    const metas = await audioCacheTx(db, ["meta"], "readonly", tx => {
+      const request = tx.objectStore("meta").getAll();
+      let rows = [];
+      request.onsuccess = () => { rows = request.result || []; };
+      return () => rows;
+    });
+
+    metas.forEach(meta => {
+      if (meta && Number.isFinite(meta.id) && meta.size > 0) {
+        audioCacheIndex.set(meta.id, meta);
+      }
+    });
+
+    try {
+      const estimate = await navigator.storage?.estimate?.();
+      if (estimate?.quota) {
+        audioCacheLimit = Math.min(
+          AUDIO_CACHE_MAX_BYTES,
+          Math.floor(estimate.quota * AUDIO_CACHE_QUOTA_SHARE)
+        );
+      }
+    } catch (_) {}
+
+    audioCacheReady = true;
+
+    // The limit may have shrunk since the last visit.
+    await audioCacheEvictFor(0, null).catch(() => {});
+  } catch (error) {
+    console.warn("Audio cache unavailable:", error);
+  }
+}
+
+// Synchronous: true only when a valid (right version) copy of this
+// song is in the cache. Never touches the disk or the network.
+function audioCacheHas(song) {
+  if (!audioCacheReady || !song || song.id == null) return false;
+
+  const meta = audioCacheIndex.get(Number(song.id));
+  if (!meta) return false;
+
+  const version = Number(song.file_size) || 0;
+  if (version && meta.fileSize && version !== meta.fileSize) {
+    // Same id, different file — never play the old one.
+    audioCacheRemove(meta.id);
+    return false;
+  }
+
+  return true;
+}
+
+// Reads a cached copy. Resolves null (never throws) when it's
+// missing, damaged, or too slow to read, so callers just fall back to
+// the network.
+async function audioCacheGetBlob(song, { touch = true } = {}) {
+  const id = Number(song.id);
+  const meta = audioCacheIndex.get(id);
+  if (!meta) return null;
+
+  let timer = null;
+
+  try {
+    const db = await audioCacheOpenDb();
+    if (!db) return null;
+
+    const read = audioCacheTx(db, ["blobs"], "readonly", tx => {
+      const request = tx.objectStore("blobs").get(id);
+      let blob = null;
+      request.onsuccess = () => { blob = request.result || null; };
+      return () => blob;
+    });
+
+    const timeout = new Promise(resolve => {
+      timer = setTimeout(() => resolve(undefined), AUDIO_CACHE_READ_TIMEOUT_MS);
+    });
+
+    const blob = await Promise.race([read, timeout]);
+
+    if (blob === undefined) return null; // too slow — use the network
+
+    if (!blob || blob.size !== meta.size) {
+      // Index says it's there but the file is gone or damaged.
+      await audioCacheRemove(id);
+      return null;
+    }
+
+    if (touch) {
+      meta.lastUsed = Date.now();
+      audioCacheTx(db, ["meta"], "readwrite", tx => {
+        tx.objectStore("meta").put(meta);
+      }).catch(() => {});
+    }
+
+    return blob;
+  } catch (error) {
+    console.warn("Audio cache read failed:", error);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Stores a COMPLETE file. Makes room first (oldest-used first). Meta
+// and file are written in one transaction, so a failure (quota,
+// interruption) leaves nothing behind.
+async function audioCachePut(song, blob) {
+  if (!audioCacheReady || !song || song.id == null) return false;
+  if (!blob || !blob.size) return false;
+
+  const id = Number(song.id);
+  const size = blob.size;
+
+  // A single huge file would just push everything else out.
+  if (size > audioCacheLimit / 2) return false;
+
+  try {
+    const estimate = await navigator.storage?.estimate?.();
+    if (
+      estimate?.quota &&
+      estimate.quota - (estimate.usage || 0) < size + AUDIO_CACHE_FREE_MARGIN_BYTES
+    ) {
+      return false;
+    }
+  } catch (_) {}
+
+  try {
+    const db = await audioCacheOpenDb();
+    if (!db) return false;
+
+    await audioCacheEvictFor(size, id);
+
+    const now = Date.now();
+    const meta = {
+      id,
+      size,
+      type: blob.type,
+      fileSize: Number(song.file_size) || 0,
+      savedAt: now,
+      lastUsed: now
+    };
+
+    await audioCacheTx(db, ["blobs", "meta"], "readwrite", tx => {
+      tx.objectStore("blobs").put(blob, id);
+      tx.objectStore("meta").put(meta);
+    });
+
+    audioCacheIndex.set(id, meta);
+    return true;
+  } catch (error) {
+    console.warn("Audio cache: couldn't store song", error);
+    return false;
+  }
+}
+
+// Frees space for `neededBytes` by deleting the least recently used
+// songs. Never removes `keepId` or the song that is playing right now.
+// Throws if there still isn't room afterwards.
+async function audioCacheEvictFor(neededBytes, keepId) {
+  const playingId = state.currentSong ? Number(state.currentSong.id) : null;
+
+  let total = 0;
+  audioCacheIndex.forEach(meta => {
+    if (meta.id !== keepId) total += meta.size;
+  });
+
+  if (total + neededBytes <= audioCacheLimit) return;
+
+  const oldestFirst = [...audioCacheIndex.values()]
+    .filter(meta => meta.id !== keepId && meta.id !== playingId)
+    .sort((a, b) => a.lastUsed - b.lastUsed);
+
+  const victims = [];
+  for (const meta of oldestFirst) {
+    if (total + neededBytes <= audioCacheLimit) break;
+    victims.push(meta.id);
+    total -= meta.size;
+  }
+
+  if (victims.length) await audioCacheRemove(victims);
+
+  if (total + neededBytes > audioCacheLimit) {
+    throw new Error("Not enough room in the audio cache");
+  }
+}
+
+// Removes one song id or an array of them. The in-memory index is
+// updated immediately; the disk follows.
+async function audioCacheRemove(ids) {
+  const list = []
+    .concat(ids)
+    .map(Number)
+    .filter(Number.isFinite);
+
+  if (!list.length) return;
+
+  list.forEach(id => audioCacheIndex.delete(id));
+
+  try {
+    const db = await audioCacheOpenDb();
+    if (!db) return;
+
+    await audioCacheTx(db, ["blobs", "meta"], "readwrite", tx => {
+      list.forEach(id => {
+        tx.objectStore("blobs").delete(id);
+        tx.objectStore("meta").delete(id);
+      });
+    });
+  } catch (error) {
+    console.warn("Audio cache: remove failed", error);
+  }
+}
+
+async function audioCacheClear() {
+  audioCacheIndex.clear();
+  audioCacheAbortDownloads();
+
+  try {
+    const db = await audioCacheOpenDb();
+    if (!db) return;
+
+    await audioCacheTx(db, ["blobs", "meta"], "readwrite", tx => {
+      tx.objectStore("blobs").clear();
+      tx.objectStore("meta").clear();
+    });
+  } catch (error) {
+    console.warn("Audio cache: clear failed", error);
+  }
+}
+
+// ---- Downloading ------------------------------------------------
+
+function audioCacheConnectionIsConstrained() {
+  const connection =
+    navigator.connection ||
+    navigator.webkitConnection ||
+    navigator.mozConnection;
+
+  return !!(
+    connection &&
+    (connection.saveData || /2g/.test(connection.effectiveType || ""))
+  );
+}
+
+function audioCacheNormalizeBlob(blob, song) {
+  if (/^audio\//i.test(blob.type)) return blob;
+
+  const type = /^audio\//i.test(song?.mime_type || "")
+    ? song.mime_type
+    : "audio/mpeg";
+
+  return new Blob([blob], { type });
+}
+
+// One plain GET for the whole file. Only a complete 200 whose size
+// matches Content-Length is accepted — an interrupted download throws
+// (the fetch/body read rejects), and a short body is rejected here,
+// so a partial file can never be returned, let alone stored.
+async function audioCacheFetchFull(song, signal) {
+  const response = await fetch(audioNetworkUrl(song), {
+    priority: "low",
+    signal
+  });
+
+  if (response.status !== 200) {
+    throw new Error(`Audio download failed (${response.status})`);
+  }
+
+  const contentType = response.headers.get("Content-Type") || "";
+  if (/json|html|text\//i.test(contentType)) {
+    throw new Error("Audio download returned a non-audio response");
+  }
+
+  const expected = Number(response.headers.get("Content-Length")) || 0;
+  const blob = await response.blob();
+
+  if (!blob.size || (expected && blob.size !== expected)) {
+    throw new Error("Audio download was incomplete");
+  }
+
+  return audioCacheNormalizeBlob(blob, song);
+}
+
+// Downloads the full song ONCE and stores it. Shared by everything
+// that needs the whole file (the cache itself and the waveform), so
+// concurrent callers join the same request. Resolves with the Blob
+// (even if storing it failed); rejects if the download failed.
+function audioCacheEnsure(song) {
+  const id = Number(song.id);
+
+  const existing = audioCacheInflight.get(id);
+  if (existing) return existing.promise;
+
+  audioCacheAttempts.set(id, (audioCacheAttempts.get(id) || 0) + 1);
+
+  const controller = new AbortController();
+
+  const promise = (async () => {
+    try {
+      const blob = await audioCacheFetchFull(song, controller.signal);
+      await audioCachePut(song, blob);
+      return blob;
+    } finally {
+      audioCacheInflight.delete(id);
+    }
+  })();
+
+  audioCacheInflight.set(id, { controller, promise });
+  return promise;
+}
+
+function audioCacheAbortDownloads(exceptId) {
+  audioCacheInflight.forEach((entry, id) => {
+    if (exceptId == null || id !== Number(exceptId)) {
+      entry.controller.abort();
+    }
+  });
+}
+
+// Lets a caller stop waiting on a shared download without cancelling
+// the download itself.
+function audioCacheAbortable(promise, signal) {
+  if (!signal) return promise;
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+// Called every time the <audio> element (re)starts playing. If the
+// current song isn't cached yet, downloads it in full a few seconds
+// later — only if it's still the current song by then.
+function audioCacheScheduleDownload() {
+  const song = state.currentSong;
+  if (!song || song.id == null || !audioCacheSupported()) return;
+
+  // Already playing the cached copy — nothing to download.
+  if (audioObjectUrl && audio.src === audioObjectUrl) return;
+
+  const id = Number(song.id);
+
+  if (audioCacheInflight.has(id)) return;
+  if ((audioCacheAttempts.get(id) || 0) >= AUDIO_CACHE_MAX_ATTEMPTS) return;
+
+  if (audioCacheStartTimer) clearTimeout(audioCacheStartTimer);
+
+  audioCacheStartTimer = setTimeout(() => {
+    audioCacheStartTimer = null;
+
+    const current = state.currentSong;
+    if (!current || Number(current.id) !== id) return;
+
+    if (!audioCacheReady || audioCacheHas(current)) return;
+    if (audioCacheInflight.has(id)) return;
+    if (navigator.onLine === false) return;
+    if (audioCacheConnectionIsConstrained()) return;
+
+    audioCacheEnsure(current).catch(error => {
+      if (error?.name !== "AbortError") {
+        console.warn("Audio cache download:", error);
+      }
+    });
+  }, AUDIO_CACHE_START_DELAY_MS);
+}
+
+// Waveform hook: returns the bytes the waveform decoder needs from
+// the cache (or from the single shared full download) so it never
+// makes its own request for a song that's cached or already being
+// downloaded. Resolves null when the caller should do its own small
+// request exactly as before (cache unsupported, or the low-end
+// devices' partial Range fetch for an uncached song).
+async function audioCacheWaveformBuffer(song, signal, byteCap) {
+  if (!audioCacheSupported()) return null;
+
+  if (audioCacheHas(song)) {
+    const cached = await audioCacheGetBlob(song, { touch: false });
+    if (cached) {
+      return (byteCap ? cached.slice(0, byteCap) : cached).arrayBuffer();
+    }
+  }
+
+  if (byteCap || !audioCacheReady) return null;
+
+  const blob = await audioCacheAbortable(audioCacheEnsure(song), signal);
+  return blob ? blob.arrayBuffer() : null;
+}
+
+// ---- Loading a song into <audio> ---------------------------------
+
+function audioRevokeObjectUrl() {
+  if (audioObjectUrl) {
+    URL.revokeObjectURL(audioObjectUrl);
+    audioObjectUrl = null;
+    audioObjectSongId = null;
+  }
+}
+
+function audioSetNetworkSource(song) {
+  audio.src = audioNetworkUrl(song);
+  audioRevokeObjectUrl();
+}
+
+function audioSetCachedSource(song, blob) {
+  const previous = audioObjectUrl;
+
+  audioObjectUrl = URL.createObjectURL(blob);
+  audioObjectSongId = Number(song.id);
+  audio.src = audioObjectUrl;
+
+  if (previous) URL.revokeObjectURL(previous);
+}
+
+function audioIsPlayingCachedCopyOf(song) {
+  return (
+    !!audioObjectUrl &&
+    audio.src === audioObjectUrl &&
+    audioObjectSongId === Number(song.id)
+  );
+}
+
+/* =========================================================
    PLAYBACK RESILIENCE
    ----------------------------------------------------------------
    Reloads the current song from where it left off and resumes
@@ -2620,19 +3252,38 @@ function retryPlaybackFromError() {
   const resumeAt = audio.currentTime || 0;
   const delay = Math.min(1000 * audioRetryCount, 4000);
 
-  setTimeout(() => {
+  setTimeout(async () => {
     // The user may have already moved on to a different song while
     // this backoff was pending — don't stomp on their new selection.
     if (!state.currentSong || state.currentSong.id !== song.id) return;
 
-    audio.src =
-      `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+    // The error happened while playing the device's cached copy: that
+    // copy is unreadable, so drop it and fall back to the network.
+    if (audioIsPlayingCachedCopyOf(song)) {
+      await audioCacheRemove(song.id);
+    }
+
+    // A song that finished caching while it was streaming can be
+    // resumed from the device instead of re-requesting it.
+    const cachedBlob = audioCacheHas(song)
+      ? await audioCacheGetBlob(song)
+      : null;
+
+    if (!state.currentSong || state.currentSong.id !== song.id) return;
+
+    if (cachedBlob) {
+      audioSetCachedSource(song, cachedBlob);
+    } else {
+      audioSetNetworkSource(song);
+    }
+
     audio.currentTime = resumeAt;
     audio.play().catch(err => console.error("Playback retry:", err));
   }, delay);
 }
 
 function setupPlayer() {
+  audioCacheInit().catch(error => console.warn("Audio cache init:", error));
   updatePlaybackModeButton();
   setupLyricsResize();
 
@@ -2821,13 +3472,12 @@ function startPlayback(song) {
   // hasn't finished playing, just resume it instead of reassigning
   // audio.src — avoids discarding the current buffer/position and
   // re-requesting the audio from the Worker/Telegram unnecessarily.
-  const expectedSrc =
-    `${AUDIO_API}/${song.id}?user_id=${encodeURIComponent(state.userId)}`;
+  const expectedSrc = audioNetworkUrl(song);
 
   const sameSongStillLoaded =
     state.currentSong &&
     Number(state.currentSong.id) === Number(song.id) &&
-    audio.src === expectedSrc &&
+    (audio.src === expectedSrc || audioIsPlayingCachedCopyOf(song)) &&
     !audio.ended;
 
   if (sameSongStillLoaded) {
@@ -2850,11 +3500,41 @@ function startPlayback(song) {
 
   state.currentSong = song;
 
-  audio.src = expectedSrc;
+  // Any full-file cache download still running belongs to a song that
+  // is no longer the one playing — stop it so it can't compete with
+  // the new song's stream.
+  audioCacheAbortDownloads(song.id);
 
-  audio.play().catch(error => {
-    console.error("Playback:", error);
-  });
+  const loadToken = ++audioLoadToken;
+
+  if (audioCacheHas(song)) {
+    // Cached on this device: check the cache BEFORE any request for
+    // the audio, and play from it. Nothing is downloaded. Falls back
+    // to the normal network stream if the cached copy can't be read.
+    audioCacheGetBlob(song).then(blob => {
+      // The user picked something else while the file was being read.
+      if (loadToken !== audioLoadToken) return;
+
+      if (blob) {
+        audioSetCachedSource(song, blob);
+      } else {
+        audioSetNetworkSource(song);
+      }
+
+      audio.play().catch(error => {
+        console.error("Playback:", error);
+      });
+    });
+  } else {
+    // Not cached: unchanged — stream from the API right away. (The
+    // full copy is fetched in the background later, see
+    // audioCacheScheduleDownload().)
+    audioSetNetworkSource(song);
+
+    audio.play().catch(error => {
+      console.error("Playback:", error);
+    });
+  }
 
   updatePlayerUI();
 
@@ -3861,21 +4541,35 @@ function loadWaveform(song) {
     // the moment the audio element stalls (see
     // ensureWaveformStallHandling()) so it can never keep starving
     // playback once a rebuffer has already started.
-    fetch(audioUrl, {
-      priority: "low",
-      signal: waveformAbortController.signal,
-      // On low-end devices, cap how many bytes we even ask for — the
-      // worker already supports Range (used elsewhere for scrubbing/
-      // metadata), so this is a normal partial request, not a hack.
-      // Starting at byte 0 keeps the format's header in the slice so
-      // decodeAudioData has what it needs for both MP3 and FLAC.
-      headers: lowEndDevice
-        ? { Range: `bytes=0-${WAVEFORM_LITE_BYTE_CAP - 1}` }
-        : undefined
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
-        return res.arrayBuffer();
+    const waveformSignal = waveformAbortController.signal;
+
+    // If the song is already in the audio cache — or its full file is
+    // already being downloaded for the cache — use those bytes
+    // instead of requesting the audio again. Resolves null when the
+    // request below is still needed (unchanged from before).
+    audioCacheWaveformBuffer(
+      song,
+      waveformSignal,
+      lowEndDevice ? WAVEFORM_LITE_BYTE_CAP : 0
+    )
+      .then(cachedBuffer => {
+        if (cachedBuffer) return cachedBuffer;
+
+        return fetch(audioUrl, {
+          priority: "low",
+          signal: waveformSignal,
+          // On low-end devices, cap how many bytes we even ask for — the
+          // worker already supports Range (used elsewhere for scrubbing/
+          // metadata), so this is a normal partial request, not a hack.
+          // Starting at byte 0 keeps the format's header in the slice so
+          // decodeAudioData has what it needs for both MP3 and FLAC.
+          headers: lowEndDevice
+            ? { Range: `bytes=0-${WAVEFORM_LITE_BYTE_CAP - 1}` }
+            : undefined
+        }).then(res => {
+          if (!res.ok) throw new Error(`Waveform fetch failed (${res.status})`);
+          return res.arrayBuffer();
+        });
       })
       .then(buffer => {
         if (token !== waveformRequestToken) return null; // superseded
