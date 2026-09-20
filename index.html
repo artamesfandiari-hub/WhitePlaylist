@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260920-1">
+  <link rel="stylesheet" href="style.css?v=20260914-8">
 </head>
 
 <body>
@@ -499,22 +499,6 @@
           </button>
 
           <button
-            class="library-item"
-            id="songActionMelody"
-          >
-            <div class="library-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none;">
-                <rect x="4" y="6" width="9" height="3" rx="1.5"></rect>
-                <rect x="4" y="10.5" width="14" height="3" rx="1.5"></rect>
-                <rect x="4" y="15" width="6" height="3" rx="1.5"></rect>
-              </svg>
-            </div>
-            <div class="library-info">
-              <div class="library-name">Extract Melody (MIDI)</div>
-            </div>
-          </button>
-
-          <button
             class="library-item destructive"
             id="songActionDelete"
           >
@@ -917,70 +901,6 @@
       </div>
     </div>
 
-    <!-- MELODY EXTRACTION MODAL -->
-    <!-- Runs entirely on-device: fetches the song's own audio,
-         decodes it with the Web Audio API, tracks pitch frame by
-         frame (a YIN-style monophonic estimator — best suited to a
-         song with one clear lead melody/vocal, not a dense full
-         mix), and writes a standard-MIDI-file melody track. See
-         melody extraction section in app.js. -->
-    <div
-      class="modal hidden"
-      id="melodyModal"
-    >
-      <div class="modal-card melody-modal-card">
-
-        <h2 id="melodyModalTitle">Extract Melody</h2>
-
-        <div class="melody-status" id="melodyStatus">Preparing…</div>
-
-        <div class="melody-progress-track">
-          <div
-            class="melody-progress-fill"
-            id="melodyProgressFill"
-            style="width:0%"
-          ></div>
-        </div>
-
-        <div class="melody-roll-wrap hidden" id="melodyRollWrap">
-          <canvas
-            class="melody-canvas"
-            id="melodyCanvas"
-            aria-hidden="true"
-          ></canvas>
-          <div class="melody-summary" id="melodySummary"></div>
-        </div>
-
-        <div class="melody-error hidden" id="melodyError"></div>
-
-        <div class="modal-actions">
-          <button
-            class="secondary-button"
-            id="melodyPlayButton"
-            disabled
-          >
-            Play Preview
-          </button>
-
-          <button
-            class="primary-button"
-            id="melodySendButton"
-            disabled
-          >
-            Send to Telegram
-          </button>
-        </div>
-
-        <button
-          class="secondary-button full-button"
-          id="closeMelodyModal"
-        >
-          Close
-        </button>
-
-      </div>
-    </div>
-
     <!-- BOTTOM NAV -->
     <nav class="bottom-nav">
 
@@ -1076,56 +996,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <!--
-    Polyphonic note-transcription model (Spotify's Basic Pitch, MIT-
-    style Apache-2.0 license) for the melody-extraction feature in
-    app.js. Loaded as a real ES module from a CDN and handed to the
-    classic-script app.js through window.__basicPitchReady, since
-    that's the whole app's script and isn't itself a module. This
-    replaces the earlier single-note pitch tracker: it can read
-    simultaneous notes (piano chords, a bass note under them, etc.)
-    instead of following one pitch at a time. See the melody
-    extraction section of app.js for how it's used and how sung
-    vocal lines get filtered back out.
-  -->
-  <script type="module">
-    // A few CDN hosts are tried in order — some CDNs are unreliable
-    // or blocked depending on the viewer's network/region, and the
-    // Telegram WebView surfaced that as a silent failure with no
-    // detail. Each failure is recorded in window.__basicPitchError
-    // so the "couldn't load" message in app.js can show what
-    // actually happened instead of a generic guess.
-    const BASIC_PITCH_SOURCES = [
-      "https://esm.sh/@spotify/basic-pitch@1.0.1",
-      "https://cdn.skypack.dev/@spotify/basic-pitch@1.0.1?min",
-      "https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm"
-    ];
-    const MODEL_URL =
-      "https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json";
-
-    window.__basicPitchReady = (async () => {
-      const errors = [];
-
-      for (const src of BASIC_PITCH_SOURCES) {
-        try {
-          const BasicPitch = await import(/* webpackIgnore: true */ src);
-          if (!BasicPitch?.BasicPitch) {
-            throw new Error("module loaded but has no BasicPitch export");
-          }
-          const instance = new BasicPitch.BasicPitch(MODEL_URL);
-          return { BasicPitch, instance };
-        } catch (error) {
-          errors.push(`${src}: ${error?.message || error}`);
-        }
-      }
-
-      window.__basicPitchError = errors.join(" | ");
-      console.error("Basic Pitch failed to load:", window.__basicPitchError);
-      return null;
-    })();
-  </script>
-
-  <script src="app.js?v=20260920-6"></script>
+  <script src="app.js?v=20260914-8"></script>
 
 </body>
 </html>
