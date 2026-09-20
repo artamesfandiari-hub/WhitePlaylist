@@ -1062,10 +1062,11 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   display: flex; align-items: center; justify-content: center;
   flex: 0 0 46px;
   position: relative; z-index: 2;
+  transition: none;
 }
-/* Press feedback is an instant opacity swap: no transition, no
-   scale/translate, so the button never changes size or position and
-   nothing animates, not even while a finger is on it. */
+/* Press feedback is an instant opacity change: no transition, no
+   scale/translate, so the button never changes size or position,
+   not even while a finger is on it. */
 .mini-like:active, .mini-play:active { opacity: .6; }
 .mini-like svg { width: 20px; height: 20px; }
 .mini-play { margin-left: 2px; border-radius: 50%; background: #fff; color: #000; }
@@ -1152,26 +1153,24 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
-  /* Same 8px optical offset as before, but as a plain margin rather
-     than a transform, so this button carries no transform at all
-     (nothing to transition, nothing for :active to scale). */
-  margin-left: -8px;
+  transform: translateX(-8px);
+  transition: none;
 }
-.player-close:active { color: #fff; }
+.player-close:active { transform: translateX(-8px); color: #fff; }
 .player-close svg { width: 21px; height: 21px; }
 
 .player-top-actions {
   display: flex;
   align-items: center;
   gap: 2px;
-  /* Was transform: translateX(8px) — same offset, no transform. */
-  margin-right: -8px;
+  transform: translateX(8px);
 }
 
 .player-menu-btn {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
   color: #888;
+  transition: none;
 }
 .player-menu-btn svg { width: 20px; height: 20px; }
 .player-menu-btn:active { color: #fff; }
@@ -1474,8 +1473,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   color: #fff;
   opacity: 1 !important;
   visibility: visible !important;
+  transition: none !important;
 }
-/* Press feedback is an instant opacity swap (no transition, no
+/* Press feedback is an instant opacity change (no transition, no
    scale/translate) so a control's box never resizes or moves. The
    !important is needed to beat the `opacity: 1 !important` guard
    above; the higher specificity of :active is what lets it win. */
@@ -1792,112 +1792,124 @@ input:focus-visible {
 }
 
 /* =========================================================
-   PLAYER CONTROLS — STATIC "HARDWARE BUTTON" LOCK
-   Kept last in the file on purpose so nothing above (or any
-   inherited/shared rule such as the app-wide :active scale, page
-   or cover animations, or the reduced-motion block) can re-introduce
-   motion on these controls. Covers the full-player row (shuffle /
-   repeat, previous, play/pause, next, like), the top-row close /
-   queue / menu buttons, and the mini-player like + play buttons,
-   plus every SVG node inside them.
+   STATIC PLAYER CONTROLS — final override, keep LAST in file.
 
-   A tap changes appearance only (opacity / color / fill), instantly:
-   no transitions, no animations, no transforms, no scaling, no
-   sliding — and every box and icon has a fixed size so swapping the
-   icon or toggling a class can never move or resize anything.
+   Covers every button in the full player (shuffle/repeat,
+   previous, play/pause, next, favorite, close, up-next, track
+   options) and the mini player (favorite, play/pause), plus all
+   of their icons and icon shapes.
+
+   Goal: a tap changes a control's colour/opacity/icon INSTANTLY
+   and nothing ever moves or resizes, even by a pixel.
+
+   - No transitions, animations, scale, rotate, or translate on
+     any control or icon, in any state (default, :active, .active,
+     .is-pause, [aria-pressed]).
+   - Fixed button boxes and fixed icon boxes, so swapping the icon
+     (play<->pause, heart<->filled heart, shuffle<->repeat) or its
+     fill/stroke can't change layout.
+   - The only transforms left are the two STATIC alignment offsets
+     (.player-close / .player-top-actions), pinned so no state can
+     alter them.
    ========================================================= */
 
-/* 1. No motion of any kind, on the buttons or anything inside them. */
+/* 1. Kill every transition / animation / transform channel. */
 .player-controls button, .player-controls button *,
-.player-controls button::before, .player-controls button::after,
+.mini-like, .mini-like *, .mini-play, .mini-play *,
 .player-close, .player-close *,
 .player-menu-btn, .player-menu-btn *,
-.mini-like, .mini-like *,
-.mini-play, .mini-play * {
+.player-top-actions {
   transition: none !important;
   animation: none !important;
-  transform: none !important;
-  translate: none !important;
+  will-change: auto !important;
   scale: none !important;
   rotate: none !important;
-  will-change: auto !important;
-}
-
-/* Pressed / active / focus states are allowed to change look only —
-   re-asserted here so they can never pick up a transform. */
-.player-controls button:active, .player-controls button:focus,
-.player-close:active, .player-close:focus,
-.player-menu-btn:active, .player-menu-btn:focus,
-.mini-like:active, .mini-like:focus,
-.mini-play:active, .mini-play:focus {
-  transform: none !important;
   translate: none !important;
-  scale: none !important;
 }
 
-/* 2. Fixed button boxes — width, height and flex size are pinned, so a
-      class/state/icon change cannot resize a button or nudge its
-      neighbours. contain: layout keeps anything inside from
-      affecting layout outside the button. */
+.player-controls button, .player-controls button *,
+.mini-like, .mini-like *, .mini-play, .mini-play *,
+.player-close *, .player-menu-btn, .player-menu-btn * {
+  transform: none !important;
+}
+
+/* The two static alignment offsets — identical in every state. */
+.player-close,
+.player-close:hover, .player-close:active, .player-close:focus,
+.player-close:focus-visible {
+  transform: translateX(-8px) !important;
+}
+.player-top-actions { transform: translateX(8px) !important; }
+
+/* 2. Fixed button boxes. */
 .player-controls button {
-  width: 44px; height: 44px;
-  min-width: 44px; min-height: 44px;
-  max-width: 44px; max-height: 44px;
-  flex: 0 0 44px;
-  margin: 0; padding: 0;
-  box-sizing: border-box;
-  contain: layout style;
+  box-sizing: border-box !important;
+  width: 44px !important; min-width: 44px !important; max-width: 44px !important;
+  height: 44px !important; min-height: 44px !important; max-height: 44px !important;
+  flex: 0 0 44px !important;
+  margin: 0 !important; padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
 }
 .player-controls .main-play {
-  width: 68px; height: 68px;
-  min-width: 68px; min-height: 68px;
-  max-width: 68px; max-height: 68px;
-  flex: 0 0 68px;
-}
-
-.player-close, .player-menu-btn {
-  width: 40px; height: 40px;
-  min-width: 40px; min-height: 40px;
-  max-width: 40px; max-height: 40px;
-  flex: 0 0 40px;
-  box-sizing: border-box;
-  contain: layout style;
+  width: 68px !important; min-width: 68px !important; max-width: 68px !important;
+  height: 68px !important; min-height: 68px !important; max-height: 68px !important;
+  flex: 0 0 68px !important;
 }
 
 .mini-like, .mini-play {
-  width: 46px; height: 46px;
-  min-width: 46px; min-height: 46px;
-  max-width: 46px; max-height: 46px;
-  flex: 0 0 46px;
-  box-sizing: border-box;
-  contain: layout style;
+  box-sizing: border-box !important;
+  width: 46px !important; min-width: 46px !important; max-width: 46px !important;
+  height: 46px !important; min-height: 46px !important; max-height: 46px !important;
+  flex: 0 0 46px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
 }
 
-/* 3. Fixed icon boxes — every icon (play, pause, heart outline/filled,
-      shuffle, repeat-all, repeat-one, ...) renders in the exact same
-      centered box, whatever its inner shapes, fill or stroke. */
+.player-close, .player-menu-btn {
+  box-sizing: border-box !important;
+  width: 40px !important; min-width: 40px !important; max-width: 40px !important;
+  height: 40px !important; min-height: 40px !important; max-height: 40px !important;
+  flex: 0 0 40px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important; justify-content: center !important;
+}
+
+/* 3. Fixed icon boxes, always centred, never offset by state. */
+.player-controls button svg,
+.mini-like svg, .mini-play svg,
+.player-close svg, .player-menu-btn svg {
+  display: block !important;
+  flex: none !important;
+  position: static !important;
+  margin: 0 !important; padding: 0 !important;
+}
 .player-controls button svg {
-  width: 26px !important; height: 26px !important;
-  min-width: 26px; min-height: 26px;
-  max-width: 26px; max-height: 26px;
-  flex: none;
-  margin: 0 !important; padding: 0;
-  position: static;
+  width: 26px !important; min-width: 26px !important; max-width: 26px !important;
+  height: 26px !important; min-height: 26px !important; max-height: 26px !important;
 }
 .player-controls .main-play svg {
-  width: 32px !important; height: 32px !important;
-  min-width: 32px; min-height: 32px;
-  max-width: 32px; max-height: 32px;
+  width: 32px !important; min-width: 32px !important; max-width: 32px !important;
+  height: 32px !important; min-height: 32px !important; max-height: 32px !important;
+}
+.mini-like svg, .mini-play svg {
+  width: 20px !important; min-width: 20px !important; max-width: 20px !important;
+  height: 20px !important; min-height: 20px !important; max-height: 20px !important;
 }
 .player-close svg {
-  width: 21px; height: 21px;
-  min-width: 21px; min-height: 21px;
-  max-width: 21px; max-height: 21px;
-  flex: none; margin: 0; padding: 0;
+  width: 21px !important; min-width: 21px !important; max-width: 21px !important;
+  height: 21px !important; min-height: 21px !important; max-height: 21px !important;
 }
-.player-menu-btn svg, .mini-like svg, .mini-play svg {
-  width: 20px; height: 20px;
-  min-width: 20px; min-height: 20px;
-  max-width: 20px; max-height: 20px;
-  flex: none; margin: 0; padding: 0;
+.player-menu-btn svg {
+  width: 20px !important; min-width: 20px !important; max-width: 20px !important;
+  height: 20px !important; min-height: 20px !important; max-height: 20px !important;
+}
+
+/* 4. Same stroke weight in every state, so filling the heart or
+      toggling repeat/shuffle can't grow or shrink the icon's edge. */
+#playerLike svg, #playerLike.active svg,
+.mini-like svg, .mini-like.active svg {
+  stroke-width: 2 !important;
 }
