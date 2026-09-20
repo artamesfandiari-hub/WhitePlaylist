@@ -5568,54 +5568,44 @@ function handleCoverErrorForContainer(containerId, token, img) {
 
      1. Fetch the song's own audio from AUDIO_API (the same
         endpoint the <audio> element streams from).
-     2. Decode it with the Web Audio API, downmix to mono and
-        resample to 16kHz — plenty for melody-range pitch and
-        far cheaper to analyze than the original file.
-     3. Slide a YIN-style monophonic pitch estimator across the
-        signal in ~12.5ms hops, in batches that yield back to the
-        browser so the progress bar and the rest of the app stay
-        responsive on a long song.
-     4. Turn the frame-by-frame pitch/loudness track into notes
-        (onset, duration, MIDI number, velocity) — a rising-energy
-        onset detector forces a new note even when the pitch holds
-        steady, so repeated notes on the same pitch don't collapse
-        into one long held note.
-     5. Write those notes out as a standard MIDI file (format 0,
-        single track) with a small hand-rolled byte writer — no
-        external library.
+     2. Decode it with the Web Audio API at 22050Hz (what the
+        model expects; stereo is fine — it downmixes internally).
+     3. Run it through Basic Pitch (Spotify's small, Apache-2.0
+        licensed polyphonic note-transcription model, loaded as a
+        real ES module — see the <script type="module"> near the
+        end of index.html), which — unlike a single-pitch tracker —
+        reads simultaneous notes: a piano chord and a bass note
+        underneath it come back as separate, overlapping notes
+        instead of collapsing into one.
+     4. Basic Pitch transcribes whatever is pitched in the mix,
+        vocals included — it has no idea what an instrument is.
+        To leave the singer out, every note gets a lightweight
+        heuristic check: sustained pitch wobble (vibrato/portamento)
+        over the note's length is something a voice does and a
+        piano key or a plucked/fretted bass note structurally can't,
+        so a note with much of that gets dropped as "probably sung".
+        It's a heuristic, not real source separation — an
+        unusually straight, sustained vocal note can still slip
+        through, and it only ever removes notes, it can't recover
+        instrument notes that were masked by a loud vocal.
+     5. Write the surviving notes out as a standard MIDI file
+        (format 0, single track) with a small hand-rolled byte
+        writer — no external library.
      6. Offer an in-browser preview (plain Web Audio oscillators)
         and, since an in-WebView blob download isn't reliable inside
         Telegram, send the finished file to the user as a normal
         Telegram document (POST /melody/send) instead of trying to
         trigger a download in the page.
-
-   This tracks ONE melody line — it is not source separation. On
-   a busy full mix it follows whichever pitch reads loudest at
-   each moment (usually lead vocal/melody, but it can wander on
-   dense instrumental passages) — see the status copy below.
    ========================================================= */
 
-const MELODY_FRAME_SIZE = 800;      // samples per analysis window (16kHz)
-const MELODY_MAX_TAU = 400;         // ~40Hz floor
-const MELODY_MIN_TAU = 15;          // ~1067Hz ceiling
-const MELODY_HOP = 200;             // ~12.5ms between frames — finer timing
-                                     // than a coarser hop, so short/fast notes
-                                     // and repeated notes have more frames to
-                                     // be caught and separated in.
-const MELODY_YIN_THRESHOLD = 0.18;  // slightly more permissive than the
-                                     // textbook 0.1–0.15 — picks up quieter/
-                                     // breathier voiced frames a stricter
-                                     // threshold would drop as "unvoiced".
-const MELODY_FRAMES_PER_BATCH = 80;
-const MELODY_MAX_SECONDS = 300;     // analyze at most the first 5 minutes
-const MELODY_SILENCE_RMS = 0.005;   // lower floor — keeps quieter melody
-                                     // passages (a vocal sitting under a
-                                     // fuller mix) from being skipped as
-                                     // silence before pitch is even tried.
-const MELODY_ONSET_MIN_RMS = MELODY_SILENCE_RMS * 1.4;
-const MELODY_ONSET_MIN_RISE = 0.012;
-const MELODY_ONSET_MIN_RELATIVE_RISE = 0.5;
-const MELODY_ONSET_REFRACTORY_SECONDS = 0.09;
+const MELODY_MAX_SECONDS = 300;           // analyze at most the first 5 minutes
+const MELODY_ONSET_THRESHOLD = 0.25;      // Basic Pitch's own example defaults
+const MELODY_FRAME_THRESHOLD = 0.25;
+const MELODY_MIN_NOTE_FRAMES = 5;
+const MELODY_MIN_NOTE_SECONDS = 0.05;
+const MELODY_PITCH_MIN = 21;              // A0 — bottom of a full piano
+const MELODY_PITCH_MAX = 108;             // C8 — top of a full piano
+const MELODY_VOCAL_BEND_RANGE = 0.35;     // pitch-bend swing (see isLikelyVocalNote)
 
 let melodyState = null;
 
@@ -5702,15 +5692,28 @@ async function runMelodyExtraction(song, token) {
   try {
     const arrayBuffer = await fetchSongArrayBuffer(song, fraction => {
       if (melodyState?.token !== token) return;
-      setMelodyProgress(fraction * 0.25);
+      setMelodyProgress(fraction * 0.15);
     });
     if (melodyState?.token !== token) return;
 
+    setMelodyStatus("Loading the transcription model…");
+    setMelodyProgress(0.17);
+
+    const basicPitch = await (window.__basicPitchReady || Promise.resolve(null));
+    if (!basicPitch) {
+      showMelodyError(
+        "The transcription model couldn't be loaded — check the connection and try again."
+      );
+      return;
+    }
+    if (melodyState?.token !== token) return;
+
     setMelodyStatus("Decoding audio…");
-    setMelodyProgress(0.28);
+    setMelodyProgress(0.22);
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const decodeCtx = new AudioCtx();
+    // 22050Hz is what Basic Pitch expects its input decoded at.
+    const decodeCtx = new AudioCtx({ sampleRate: 22050 });
     let decoded;
     try {
       decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
@@ -5719,33 +5722,52 @@ async function runMelodyExtraction(song, token) {
     }
     if (melodyState?.token !== token) return;
 
-    setMelodyStatus("Preparing signal…");
-    setMelodyProgress(0.35);
+    const { buffer: analysisBuffer, truncated } =
+      capAudioBufferDuration(decoded, MELODY_MAX_SECONDS);
 
-    const truncated = decoded.duration > MELODY_MAX_SECONDS;
-    const { samples, sampleRate } = await resampleMono(decoded, 16000);
-    if (melodyState?.token !== token) return;
+    setMelodyStatus("Transcribing piano, bass and other instruments…");
+    setMelodyProgress(0.27);
 
-    setMelodyStatus("Listening for the melody…");
+    const frames = [];
+    const onsets = [];
+    const contours = [];
 
-    const { pitchHz, rms, hop } = await trackPitch(
-      samples,
-      sampleRate,
+    await basicPitch.instance.evaluateModel(
+      analysisBuffer,
+      (f, o, c) => {
+        frames.push(...f);
+        onsets.push(...o);
+        contours.push(...c);
+      },
       fraction => {
         if (melodyState?.token !== token) return;
-        setMelodyProgress(0.35 + fraction * 0.5);
+        setMelodyProgress(0.27 + Math.max(0, Math.min(1, fraction)) * 0.58);
       }
     );
     if (melodyState?.token !== token) return;
 
-    setMelodyStatus("Writing notes…");
-    setMelodyProgress(0.88);
+    setMelodyStatus("Filtering out vocals, writing notes…");
+    setMelodyProgress(0.9);
 
-    const notes = notesFromPitchTrack(pitchHz, rms, hop, sampleRate);
+    const { BasicPitch } = basicPitch;
+    const rawNotes = BasicPitch.noteFramesToTime(
+      BasicPitch.addPitchBendsToNoteEvents(
+        contours,
+        BasicPitch.outputToNotesPoly(
+          frames,
+          onsets,
+          MELODY_ONSET_THRESHOLD,
+          MELODY_FRAME_THRESHOLD,
+          MELODY_MIN_NOTE_FRAMES
+        )
+      )
+    );
+
+    const notes = notesFromBasicPitchOutput(rawNotes);
 
     if (!notes.length) {
       showMelodyError(
-        "No clear melody line was found in this song — it may be too dense, or mostly percussive, for a single-line extraction."
+        "No clear instrumental notes were found in this song — it may be entirely vocal, or too dense to tell instruments apart."
       );
       return;
     }
@@ -5829,245 +5851,79 @@ async function fetchSongArrayBuffer(song, onProgress) {
   return merged.buffer;
 }
 
-async function resampleMono(audioBuffer, targetRate) {
-  const cappedDuration = Math.min(audioBuffer.duration, MELODY_MAX_SECONDS);
-  const length = Math.max(1, Math.ceil(cappedDuration * targetRate));
+// Trims a decoded AudioBuffer to at most maxSeconds, so a very long
+// song has a bounded worst-case transcription time on a phone.
+function capAudioBufferDuration(buffer, maxSeconds) {
+  if (buffer.duration <= maxSeconds) return { buffer, truncated: false };
 
-  const OfflineCtx =
-    window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const offlineCtx = new OfflineCtx(1, length, targetRate);
+  const length = Math.floor(maxSeconds * buffer.sampleRate);
+  const trimmed = new AudioBuffer({
+    length,
+    numberOfChannels: buffer.numberOfChannels,
+    sampleRate: buffer.sampleRate
+  });
 
-  const source = offlineCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  // Connecting a multi-channel buffer into this 1-channel context
-  // triggers the browser's standard stereo/mono downmix for us.
-  source.connect(offlineCtx.destination);
-  source.start(0);
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    trimmed.copyToChannel(buffer.getChannelData(ch).subarray(0, length), ch);
+  }
 
-  const rendered = await offlineCtx.startRendering();
-  return { samples: rendered.getChannelData(0), sampleRate: targetRate };
+  return { buffer: trimmed, truncated: true };
 }
 
-async function trackPitch(samples, sampleRate, onProgress) {
-  const hop = MELODY_HOP;
-  const frameCount = Math.max(
-    0,
-    Math.floor((samples.length - MELODY_FRAME_SIZE) / hop)
-  );
+// A note gets flagged as "probably sung" when its pitch wobbles a
+// lot over its own length — vibrato/portamento a voice does and a
+// struck piano key or a plucked/fretted bass note structurally
+// doesn't. Basic Pitch reports each note's pitch-bend curve as a
+// fraction of a semitone per frame; a wide swing across that curve
+// is the signal.
+function isLikelyVocalNote(rawNote) {
+  const bends = rawNote.pitchBends;
+  if (!bends || !bends.length) return false;
 
-  const pitchHz = new Float32Array(frameCount);
-  const rms = new Float32Array(frameCount);
-  const diff = new Float32Array(MELODY_MAX_TAU + 1);
-
-  for (
-    let batchStart = 0;
-    batchStart < frameCount;
-    batchStart += MELODY_FRAMES_PER_BATCH
-  ) {
-    const batchEnd = Math.min(
-      frameCount,
-      batchStart + MELODY_FRAMES_PER_BATCH
-    );
-
-    for (let f = batchStart; f < batchEnd; f++) {
-      const result = yinFrame(samples, f * hop, sampleRate, diff);
-      pitchHz[f] = result.freq;
-      rms[f] = result.energy;
-    }
-
-    onProgress?.(batchEnd / frameCount);
-    // Yield so the progress bar actually paints and a long song
-    // doesn't read as a frozen tab.
-    await new Promise(resolve => requestAnimationFrame(resolve));
+  let min = Infinity, max = -Infinity;
+  for (const b of bends) {
+    if (typeof b !== "number") continue;
+    if (b < min) min = b;
+    if (b > max) max = b;
   }
+  if (!isFinite(min) || !isFinite(max)) return false;
 
-  return { pitchHz, rms, hop };
+  return (max - min) > MELODY_VOCAL_BEND_RANGE;
 }
 
-// One frame of the YIN pitch algorithm: cumulative mean normalized
-// difference function + parabolic interpolation for sub-sample tau.
-function yinFrame(samples, offset, sampleRate, diff) {
-  const W = MELODY_FRAME_SIZE;
-  const maxTau = MELODY_MAX_TAU;
-
-  let energySum = 0;
-  for (let i = 0; i < W; i++) {
-    const s = samples[offset + i] || 0;
-    energySum += s * s;
-  }
-  const rmsValue = Math.sqrt(energySum / W);
-
-  // Skip the expensive difference function on silence/near-silence.
-  if (rmsValue < MELODY_SILENCE_RMS) {
-    return { freq: 0, energy: rmsValue };
-  }
-
-  diff[0] = 1;
-  let runningSum = 0;
-
-  for (let tau = 1; tau <= maxTau; tau++) {
-    let sum = 0;
-    for (let i = 0; i < W; i++) {
-      const d = samples[offset + i] - (samples[offset + i + tau] || 0);
-      sum += d * d;
-    }
-    runningSum += sum;
-    diff[tau] = runningSum === 0 ? 1 : (sum * tau) / runningSum;
-  }
-
-  let tauEstimate = -1;
-  for (let tau = MELODY_MIN_TAU; tau <= maxTau; tau++) {
-    if (diff[tau] < MELODY_YIN_THRESHOLD) {
-      while (tau + 1 <= maxTau && diff[tau + 1] < diff[tau]) tau++;
-      tauEstimate = tau;
-      break;
-    }
-  }
-
-  if (tauEstimate === -1) {
-    return { freq: 0, energy: rmsValue };
-  }
-
-  let betterTau = tauEstimate;
-  const x0 = tauEstimate > 1 ? tauEstimate - 1 : tauEstimate;
-  const x2 = tauEstimate < maxTau ? tauEstimate + 1 : tauEstimate;
-  if (x0 !== tauEstimate && x2 !== tauEstimate) {
-    const s0 = diff[x0], s1 = diff[tauEstimate], s2 = diff[x2];
-    const denom = 2 * (2 * s1 - s2 - s0);
-    if (denom !== 0) betterTau = tauEstimate + (s2 - s0) / denom;
-  }
-
-  return { freq: sampleRate / betterTau, energy: rmsValue };
-}
-
-// Rising-energy onsets — a plain "did loudness jump" flux detector.
-// Two consecutive same-pitch notes (a repeated note, very common in
-// real melodies) would otherwise read as one long held note, since
-// the segmentation below only splits on a pitch or silence change.
-// Forcing a split at each detected onset is what lets those show up
-// as separate notes.
-function detectOnsets(rms, frameSeconds) {
-  const onsets = new Uint8Array(rms.length);
-  const refractoryFrames = Math.max(
-    1,
-    Math.round(MELODY_ONSET_REFRACTORY_SECONDS / frameSeconds)
-  );
-  let lastOnset = -Infinity;
-
-  for (let i = 2; i < rms.length; i++) {
-    const prev = rms[i - 2];
-    const rise = rms[i] - prev;
-    const relativeRise = prev > 0.0005 ? rise / prev : rise / 0.0005;
-
-    if (
-      rms[i] > MELODY_ONSET_MIN_RMS &&
-      rise > MELODY_ONSET_MIN_RISE &&
-      relativeRise > MELODY_ONSET_MIN_RELATIVE_RISE &&
-      i - lastOnset >= refractoryFrames
-    ) {
-      onsets[i] = 1;
-      lastOnset = i;
-    }
-  }
-
-  return onsets;
-}
-
-function notesFromPitchTrack(pitchHz, rms, hop, sampleRate) {
-  const frameCount = pitchHz.length;
-  const frameSeconds = hop / sampleRate;
-
-  const rawNotes = new Float32Array(frameCount);
-  for (let i = 0; i < frameCount; i++) {
-    rawNotes[i] = pitchHz[i] > 0 ? freqToMidi(pitchHz[i]) : -1;
-  }
-
-  const onsets = detectOnsets(rms, frameSeconds);
-
-  // Short median filter over the frame-level note numbers — shakes
-  // out single-frame octave jumps / detector jitter before we group
-  // frames into notes.
-  const filtered = new Int16Array(frameCount);
-  const win = 7;
-  const half = Math.floor(win / 2);
-  const buf = [];
-  for (let i = 0; i < frameCount; i++) {
-    buf.length = 0;
-    for (let k = -half; k <= half; k++) {
-      const idx = i + k;
-      if (idx >= 0 && idx < frameCount && rawNotes[idx] >= 0) {
-        buf.push(Math.round(rawNotes[idx]));
-      }
-    }
-    if (!buf.length) {
-      filtered[i] = -1;
-      continue;
-    }
-    buf.sort((a, b) => a - b);
-    filtered[i] = buf[Math.floor(buf.length / 2)];
-  }
-
+// Basic Pitch's raw note objects → the {midi, start, duration,
+// velocity} shape the rest of this module (MIDI writer, piano
+// roll, preview) already works with. Field names are read
+// defensively since they aren't pinned across versions of the
+// library.
+function notesFromBasicPitchOutput(rawNotes) {
   const notes = [];
-  const minNoteFrames = Math.max(2, Math.round(0.055 / frameSeconds));
-  const maxGapFrames = Math.max(1, Math.round(0.06 / frameSeconds));
 
-  let i = 0;
-  while (i < frameCount) {
-    if (filtered[i] < 0) {
-      i++;
-      continue;
-    }
+  for (const raw of rawNotes) {
+    const start = raw.startTimeSeconds ?? raw.startTime ?? raw.start;
+    const duration =
+      raw.durationSeconds ?? raw.duration ??
+      (raw.endTimeSeconds != null && start != null
+        ? raw.endTimeSeconds - start
+        : undefined);
+    const midi = raw.pitchMidi ?? raw.pitch;
+    const amplitude = raw.amplitude ?? raw.velocity ?? 0.6;
 
-    const noteNumber = filtered[i];
-    let start = i;
-    let end = i;
-    let gap = 0;
-    let j = i + 1;
+    if (start == null || duration == null || midi == null) continue;
+    if (duration < MELODY_MIN_NOTE_SECONDS) continue;
+    if (midi < MELODY_PITCH_MIN || midi > MELODY_PITCH_MAX) continue;
+    if (isLikelyVocalNote(raw)) continue;
 
-    while (j < frameCount) {
-      // A fresh onset mid-run forces a new note even though the
-      // pitch hasn't changed — see detectOnsets() above.
-      if (onsets[j] && j > start) break;
-
-      if (filtered[j] === noteNumber) {
-        end = j;
-        gap = 0;
-        j++;
-      } else if (filtered[j] < 0 && gap < maxGapFrames) {
-        gap++;
-        j++;
-      } else {
-        break;
-      }
-    }
-
-    const frameSpan = end - start + 1;
-    if (frameSpan >= minNoteFrames) {
-      let energySum = 0, energyCount = 0;
-      for (let k = start; k <= end; k++) {
-        if (rms[k]) {
-          energySum += rms[k];
-          energyCount++;
-        }
-      }
-      const avgRms = energyCount ? energySum / energyCount : 0.02;
-
-      notes.push({
-        midi: Math.max(24, Math.min(103, noteNumber)),
-        start: start * frameSeconds,
-        duration: frameSpan * frameSeconds,
-        velocity: Math.max(35, Math.min(115, Math.round(avgRms * 900)))
-      });
-    }
-
-    i = j;
+    notes.push({
+      midi: Math.round(midi),
+      start,
+      duration,
+      velocity: Math.max(30, Math.min(120, Math.round(amplitude * 127)))
+    });
   }
 
+  notes.sort((a, b) => a.start - b.start);
   return notes;
-}
-
-function freqToMidi(freq) {
-  return 69 + 12 * Math.log2(freq / 440);
 }
 
 function midiToFreq(midi) {
@@ -6152,7 +6008,7 @@ function drawPianoRoll(canvas, notes, totalDuration) {
 
   const dpr = window.devicePixelRatio || 1;
   const displayWidth = canvas.clientWidth || 320;
-  const displayHeight = 120;
+  const displayHeight = 160;
 
   canvas.width = displayWidth * dpr;
   canvas.height = displayHeight * dpr;

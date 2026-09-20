@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260914-8">
+  <link rel="stylesheet" href="style.css?v=20260920-1">
 </head>
 
 <body>
@@ -1076,7 +1076,34 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260914-8"></script>
+  <!--
+    Polyphonic note-transcription model (Spotify's Basic Pitch, MIT-
+    style Apache-2.0 license) for the melody-extraction feature in
+    app.js. Loaded as a real ES module from a CDN and handed to the
+    classic-script app.js through window.__basicPitchReady, since
+    that's the whole app's script and isn't itself a module. This
+    replaces the earlier single-note pitch tracker: it can read
+    simultaneous notes (piano chords, a bass note under them, etc.)
+    instead of following one pitch at a time. See the melody
+    extraction section of app.js for how it's used and how sung
+    vocal lines get filtered back out.
+  -->
+  <script type="module">
+    window.__basicPitchReady = (async () => {
+      const BasicPitch = await import(
+        "https://cdn.skypack.dev/@spotify/basic-pitch@1.0.1?min"
+      );
+      const modelUrl =
+        "https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json";
+      const instance = new BasicPitch.BasicPitch(modelUrl);
+      return { BasicPitch, instance };
+    })().catch(error => {
+      console.error("Basic Pitch failed to load:", error);
+      return null;
+    });
+  </script>
+
+  <script src="app.js?v=20260920-1"></script>
 
 </body>
 </html>

@@ -1698,7 +1698,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .melody-roll-wrap { margin: 16px 0 4px; }
 .melody-canvas {
   width: 100%;
-  height: 120px;
+  height: 160px;
   display: block;
   border-radius: var(--radius-sm);
   background: var(--bg);
