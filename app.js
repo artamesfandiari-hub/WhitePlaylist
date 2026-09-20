@@ -5569,9 +5569,9 @@ function handleCoverErrorForContainer(containerId, token, img) {
      1. Fetch the song's own audio from AUDIO_API (the same
         endpoint the <audio> element streams from).
      2. Decode it with the Web Audio API at the device's default
-        rate (forcing a non-default AudioContext rate is unreliable
-        on some iOS WebViews), then downmix to mono and resample to
-        22050Hz ourselves. Basic Pitch does NOT resample: its
+        rate (forcing a non-default context rate is unreliable or
+        hangs on some iOS WebViews), then trim, downmix to mono and
+        resample to 22050Hz ourselves in plain JS. Basic Pitch does NOT resample: its
         evaluateModel() throws "Input audio buffer is not at correct
         sample rate" for any AudioBuffer that isn't 22050Hz.
      3. Run it through Basic Pitch (Spotify's small, Apache-2.0
@@ -5604,8 +5604,8 @@ function handleCoverErrorForContainer(containerId, token, img) {
 
 const MELODY_MAX_SECONDS = 120;           // analyze at most the first 2 minutes (phone memory is tight)
 const MELODY_MIN_SAFE_SECONDS = 20;       // never shrink the cap below this after a crash
-const MELODY_RUN_KEY = "wp_melody_run";           // breadcrumb: set while a run is in flight
-const MELODY_SAFE_SECONDS_KEY = "wp_melody_safe_seconds"; // learned cap after a crash
+const MELODY_RUN_KEY = "wp_melody_run_v2";           // breadcrumb: set while a run is in flight
+const MELODY_SAFE_SECONDS_KEY = "wp_melody_safe_seconds_v2"; // learned cap after a crash
 const MELODY_MODEL_SAMPLE_RATE = 22050;    // Basic Pitch requires exactly this rate, mono
 const MELODY_ONSET_THRESHOLD = 0.25;      // Basic Pitch's own example defaults
 const MELODY_FRAME_THRESHOLD = 0.25;
@@ -5790,31 +5790,26 @@ async function runMelodyExtraction(song, token) {
 
     stage = "decoding audio";
     melodyMarkRun(stage, maxSeconds);
-    // Decoded straight into a 22050Hz OfflineAudioContext when the
-    // WebView allows it (half the memory of a 48kHz decode), else a
-    // default-rate AudioContext — forcing a non-default *realtime*
-    // AudioContext rate is unreliable on some iOS WebViews. Either way
-    // resampleForBasicPitch below guarantees mono 22050Hz for the model.
+    // Decoded at the device's default rate (forcing a non-default
+    // AudioContext / OfflineAudioContext rate is unreliable or even
+    // hangs on some iOS WebViews). resampleForBasicPitch below trims,
+    // downmixes and converts to the mono 22050Hz the model requires.
     let decoded = await decodeAudioForMelody(arrayBuffer);
     arrayBuffer = null; // free the compressed bytes early
     if (melodyState?.token !== token) return;
 
-    stage = "trimming audio";
-    melodyMarkRun(stage, maxSeconds);
-    const { buffer: analysisBuffer, truncated } =
-      capAudioBufferDuration(decoded, maxSeconds);
-    decoded = null; // let the full-length decode be garbage-collected
-
     setMelodyStatus("Preparing audio…");
     stage = "resampling audio to 22050Hz";
     melodyMarkRun(stage, maxSeconds);
-    const modelBuffer = await resampleForBasicPitch(
-      analysisBuffer,
+    const { buffer: modelBuffer, truncated } = await resampleForBasicPitch(
+      decoded,
+      maxSeconds,
       fraction => {
         if (melodyState?.token !== token) return;
         setMelodyProgress(0.22 + Math.max(0, Math.min(1, fraction)) * 0.05);
       }
     );
+    decoded = null; // let the full-length decode be garbage-collected
     if (melodyState?.token !== token) return;
 
     if (modelBuffer.sampleRate !== MELODY_MODEL_SAMPLE_RATE) {
@@ -5924,25 +5919,11 @@ async function runMelodyExtraction(song, token) {
   }
 }
 
-// Decodes the song straight into a 22050Hz OfflineAudioContext when
-// possible: the browser resamples during decode, so the full-length
-// buffer is ~half the size of a 48kHz one — that's the biggest memory
-// spike in the whole pipeline. Falls back to a normal AudioContext.
+// Plain default-rate AudioContext decode. (An OfflineAudioContext
+// decode at 22050Hz was tried to save memory, but it hangs the iOS
+// Telegram WebView — the UI froze on "Decoding audio" and even the
+// Close button stopped responding — so don't use it.)
 async function decodeAudioForMelody(arrayBuffer) {
-  try {
-    const OfflineCtx =
-      window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (OfflineCtx) {
-      const ctx = new OfflineCtx(1, 1, MELODY_MODEL_SAMPLE_RATE);
-      const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      if (decoded && decoded.sampleRate === MELODY_MODEL_SAMPLE_RATE) {
-        return decoded;
-      }
-    }
-  } catch (error) {
-    console.warn("Offline decode failed, using AudioContext:", error);
-  }
-
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const decodeCtx = new AudioCtx();
   try {
@@ -5989,25 +5970,6 @@ async function fetchSongArrayBuffer(song, onProgress) {
   return merged.buffer;
 }
 
-// Trims a decoded AudioBuffer to at most maxSeconds, so a very long
-// song has a bounded worst-case transcription time on a phone.
-function capAudioBufferDuration(buffer, maxSeconds) {
-  if (buffer.duration <= maxSeconds) return { buffer, truncated: false };
-
-  const length = Math.floor(maxSeconds * buffer.sampleRate);
-  const trimmed = new AudioBuffer({
-    length,
-    numberOfChannels: buffer.numberOfChannels,
-    sampleRate: buffer.sampleRate
-  });
-
-  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-    trimmed.copyToChannel(buffer.getChannelData(ch).subarray(0, length), ch);
-  }
-
-  return { buffer: trimmed, truncated: true };
-}
-
 // Builds a mono AudioBuffer at an arbitrary sample rate from raw
 // samples. Prefers the AudioBuffer constructor, falls back to
 // createBuffer() for older WebKit builds.
@@ -6033,60 +5995,33 @@ function makeMonoAudioBuffer(data, sampleRate) {
 // Basic Pitch's evaluateModel() only accepts a MONO AudioBuffer at
 // exactly 22050Hz — it does not resample and throws otherwise
 // ("Input audio buffer is not at correct sample rate! Is 48000.
-// Should be 22050"). So we convert here:
-//   1. Preferred: an OfflineAudioContext at 22050Hz. The browser
-//      downmixes stereo and applies proper anti-aliasing filtering.
-//   2. Fallback (if the WebView can't do that): a windowed-sinc
-//      resampler in plain JS.
-async function resampleForBasicPitch(buffer, onProgress) {
+// Should be 22050"). This does three things in one pass, in plain JS
+// (no OfflineAudioContext — that hung the iOS Telegram WebView):
+//   1. keeps only the first maxSeconds of audio,
+//   2. downmixes to mono,
+//   3. resamples to 22050Hz with a Hann-windowed-sinc low-pass filter.
+// Works in chunks that yield to the event loop so the UI (and the
+// Close button) stay responsive. Returns { buffer, truncated }.
+async function resampleForBasicPitch(buffer, maxSeconds, onProgress) {
   const targetRate = MELODY_MODEL_SAMPLE_RATE;
-
-  if (buffer.sampleRate === targetRate) {
-    onProgress?.(1);
-    if (buffer.numberOfChannels === 1) return buffer;
-
-    // Already at the right rate — just average the channels to mono.
-    const mono = new Float32Array(buffer.length);
-    const chCount = buffer.numberOfChannels;
-    for (let ch = 0; ch < chCount; ch++) {
-      const data = buffer.getChannelData(ch);
-      for (let i = 0; i < mono.length; i++) mono[i] += data[i] / chCount;
-    }
-    return makeMonoAudioBuffer(mono, targetRate);
-  }
-
-  try {
-    const OfflineCtx =
-      window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OfflineCtx) throw new Error("OfflineAudioContext unavailable");
-
-    const length = Math.max(1, Math.ceil(buffer.duration * targetRate));
-    const offline = new OfflineCtx(1, length, targetRate);
-    const source = offline.createBufferSource();
-    source.buffer = buffer;
-    source.connect(offline.destination); // stereo -> mono downmix
-    source.start(0);
-
-    const rendered = await offline.startRendering();
-    if (rendered && rendered.sampleRate === targetRate && rendered.length > 0) {
-      onProgress?.(1);
-      return rendered;
-    }
-    throw new Error("OfflineAudioContext returned an unexpected buffer");
-  } catch (error) {
-    console.warn("Native resample failed, using JS fallback:", error);
-  }
-
-  // ---- JS fallback ----
   const srcRate = buffer.sampleRate;
   const channels = buffer.numberOfChannels;
-  const srcLength = buffer.length;
+  const srcLength = Math.min(
+    buffer.length,
+    Math.floor(maxSeconds * srcRate)
+  );
+  const truncated = srcLength < buffer.length;
 
-  // Downmix to mono.
+  // Downmix (and trim) to mono.
   const mono = new Float32Array(srcLength);
   for (let ch = 0; ch < channels; ch++) {
     const data = buffer.getChannelData(ch);
     for (let i = 0; i < srcLength; i++) mono[i] += data[i] / channels;
+  }
+
+  if (srcRate === targetRate) {
+    onProgress?.(1);
+    return { buffer: makeMonoAudioBuffer(mono, targetRate), truncated };
   }
 
   const ratio = srcRate / targetRate;
@@ -6110,7 +6045,7 @@ async function resampleForBasicPitch(buffer, onProgress) {
     kernel[i] = sinc * hann;
   }
 
-  const CHUNK = 100000;
+  const CHUNK = 20000;
   for (let base = 0; base < outLength; base += CHUNK) {
     const end = Math.min(outLength, base + CHUNK);
     for (let i = base; i < end; i++) {
@@ -6132,7 +6067,7 @@ async function resampleForBasicPitch(buffer, onProgress) {
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 
-  return makeMonoAudioBuffer(out, targetRate);
+  return { buffer: makeMonoAudioBuffer(out, targetRate), truncated };
 }
 
 // A note gets flagged as "probably sung" when its pitch wobbles a
