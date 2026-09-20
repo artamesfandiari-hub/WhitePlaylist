@@ -5568,10 +5568,11 @@ function handleCoverErrorForContainer(containerId, token, img) {
 
      1. Fetch the song's own audio from AUDIO_API (the same
         endpoint the <audio> element streams from).
-     2. Decode it with the Web Audio API (stereo is fine — Basic
-        Pitch downmixes and resamples to 22050Hz internally, so the
-        AudioContext here is left at its default rate rather than
-        forced to match).
+     2. Decode it with the Web Audio API at the device's default
+        rate, then downmix to mono and resample to 22050Hz
+        ourselves (resampleForBasicPitch below) — Basic Pitch's
+        evaluateModel() does NOT resample; it throws unless it's
+        handed a 22050Hz AudioBuffer.
      3. Run it through Basic Pitch (Spotify's small, Apache-2.0
         licensed polyphonic note-transcription model, loaded as a
         real ES module — see the <script type="module"> near the
@@ -5728,12 +5729,12 @@ async function runMelodyExtraction(song, token) {
 
     stage = "decoding audio";
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    // Basic Pitch resamples internally to 22050Hz regardless of the
-    // input's rate (per its own docs), so the AudioContext here is
-    // left at its default rate rather than forced to 22050 — some
-    // WebKit/iOS WebViews are unreliable with a non-default
-    // AudioContext sampleRate, which was the likely cause of this
-    // stage failing on iOS Telegram.
+    // The AudioContext is deliberately left at its default rate:
+    // some WebKit/iOS WebViews are unreliable with a non-default
+    // AudioContext sampleRate (and typically decode at 44100/48000
+    // anyway). Basic Pitch's evaluateModel() does NOT resample —
+    // it throws "Input audio buffer is not at correct sample rate"
+    // unless the buffer is exactly 22050Hz — so we convert below.
     const decodeCtx = new AudioCtx();
     let decoded;
     try {
@@ -5744,8 +5745,14 @@ async function runMelodyExtraction(song, token) {
     if (melodyState?.token !== token) return;
 
     stage = "trimming audio";
-    const { buffer: analysisBuffer, truncated } =
+    const { buffer: trimmedBuffer, truncated } =
       capAudioBufferDuration(decoded, MELODY_MAX_SECONDS);
+
+    // Trim first (cheaper), then downmix + resample to what the
+    // model requires: mono, 22050Hz.
+    stage = "resampling audio to 22050Hz";
+    const analysisBuffer = await resampleForBasicPitch(trimmedBuffer);
+    if (melodyState?.token !== token) return;
 
     setMelodyStatus("Transcribing piano, bass and other instruments…");
     setMelodyProgress(0.27);
@@ -5875,6 +5882,119 @@ async function fetchSongArrayBuffer(song, onProgress) {
     offset += chunk.length;
   }
   return merged.buffer;
+}
+
+// Basic Pitch's model input rate. evaluateModel() throws unless the
+// AudioBuffer it receives is exactly this.
+const BASIC_PITCH_SAMPLE_RATE = 22050;
+
+// Converts any decoded AudioBuffer (any channel count, any rate —
+// iOS usually decodes at 48000) into the mono 22050Hz AudioBuffer
+// Basic Pitch requires. Uses an OfflineAudioContext (high-quality
+// native resampler + automatic stereo->mono downmix); if that's
+// unavailable or fails in this WebView, falls back to a plain-JS
+// box-filter resampler.
+async function resampleForBasicPitch(buffer) {
+  if (
+    buffer.sampleRate === BASIC_PITCH_SAMPLE_RATE &&
+    buffer.numberOfChannels === 1
+  ) {
+    return buffer;
+  }
+
+  const outLength = Math.max(
+    1,
+    Math.ceil(buffer.duration * BASIC_PITCH_SAMPLE_RATE)
+  );
+
+  try {
+    const OfflineCtx =
+      window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineCtx) throw new Error("OfflineAudioContext unavailable");
+
+    // Positional constructor: works on older WebKit too.
+    const offline = new OfflineCtx(1, outLength, BASIC_PITCH_SAMPLE_RATE);
+    const source = offline.createBufferSource();
+    source.buffer = buffer;
+    // Destination is mono, so a stereo source is down-mixed
+    // automatically by the Web Audio graph.
+    source.connect(offline.destination);
+    source.start(0);
+
+    // Modern browsers return a Promise; old Safari only supports the
+    // oncomplete callback.
+    const rendered = await new Promise((resolve, reject) => {
+      let settled = false;
+      const done = fn => value => {
+        if (settled) return;
+        settled = true;
+        fn(value);
+      };
+      const ok = done(resolve);
+      const fail = done(reject);
+
+      offline.oncomplete = e => ok(e.renderedBuffer);
+      try {
+        const p = offline.startRendering();
+        if (p && typeof p.then === "function") p.then(ok, fail);
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+    if (
+      rendered &&
+      Math.round(rendered.sampleRate) === BASIC_PITCH_SAMPLE_RATE
+    ) {
+      return rendered;
+    }
+    throw new Error("rendered buffer has unexpected sample rate");
+  } catch (err) {
+    console.warn("OfflineAudioContext resample failed, using JS fallback:", err);
+    return resampleMonoInJs(buffer, outLength);
+  }
+}
+
+// Fallback: average all channels to mono, then box-filter decimate
+// (averaging every source sample that falls in an output sample's
+// window doubles as a cheap anti-aliasing low-pass).
+function resampleMonoInJs(buffer, outLength) {
+  const channels = [];
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    channels.push(buffer.getChannelData(ch));
+  }
+  const srcLen = buffer.length;
+  const ratio = buffer.sampleRate / BASIC_PITCH_SAMPLE_RATE;
+  const out = new Float32Array(outLength);
+
+  for (let i = 0; i < outLength; i++) {
+    const start = Math.min(srcLen - 1, Math.floor(i * ratio));
+    const end = Math.min(srcLen, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = start; j < end; j++) {
+      for (let ch = 0; ch < channels.length; ch++) sum += channels[ch][j];
+    }
+    out[i] = sum / ((end - start) * channels.length);
+  }
+
+  let result;
+  if (typeof AudioBuffer === "function") {
+    try {
+      result = new AudioBuffer({
+        length: outLength,
+        numberOfChannels: 1,
+        sampleRate: BASIC_PITCH_SAMPLE_RATE
+      });
+    } catch (_) { /* fall through to createBuffer */ }
+  }
+  if (!result) {
+    const OfflineCtx =
+      window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    result = new OfflineCtx(1, 1, BASIC_PITCH_SAMPLE_RATE)
+      .createBuffer(1, outLength, BASIC_PITCH_SAMPLE_RATE);
+  }
+  result.copyToChannel(out, 0);
+  return result;
 }
 
 // Trims a decoded AudioBuffer to at most maxSeconds, so a very long
