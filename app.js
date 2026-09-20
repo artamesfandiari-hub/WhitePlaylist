@@ -5701,8 +5701,14 @@ async function runMelodyExtraction(song, token) {
 
     const basicPitch = await (window.__basicPitchReady || Promise.resolve(null));
     if (!basicPitch) {
+      // window.__basicPitchError (set in index.html) carries the
+      // actual per-CDN failure reasons — surfacing it is the only
+      // way to diagnose a load failure on a phone with no devtools.
+      const detail = window.__basicPitchError
+        ? ` (${window.__basicPitchError})`
+        : "";
       showMelodyError(
-        "The transcription model couldn't be loaded — check the connection and try again."
+        `The transcription model couldn't be loaded — check the connection and try again.${detail}`
       );
       return;
     }

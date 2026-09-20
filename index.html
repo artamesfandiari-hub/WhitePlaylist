@@ -1089,21 +1089,43 @@
     vocal lines get filtered back out.
   -->
   <script type="module">
+    // A few CDN hosts are tried in order — some CDNs are unreliable
+    // or blocked depending on the viewer's network/region, and the
+    // Telegram WebView surfaced that as a silent failure with no
+    // detail. Each failure is recorded in window.__basicPitchError
+    // so the "couldn't load" message in app.js can show what
+    // actually happened instead of a generic guess.
+    const BASIC_PITCH_SOURCES = [
+      "https://esm.sh/@spotify/basic-pitch@1.0.1",
+      "https://cdn.skypack.dev/@spotify/basic-pitch@1.0.1?min",
+      "https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm"
+    ];
+    const MODEL_URL =
+      "https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json";
+
     window.__basicPitchReady = (async () => {
-      const BasicPitch = await import(
-        "https://cdn.skypack.dev/@spotify/basic-pitch@1.0.1?min"
-      );
-      const modelUrl =
-        "https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json";
-      const instance = new BasicPitch.BasicPitch(modelUrl);
-      return { BasicPitch, instance };
-    })().catch(error => {
-      console.error("Basic Pitch failed to load:", error);
+      const errors = [];
+
+      for (const src of BASIC_PITCH_SOURCES) {
+        try {
+          const BasicPitch = await import(/* webpackIgnore: true */ src);
+          if (!BasicPitch?.BasicPitch) {
+            throw new Error("module loaded but has no BasicPitch export");
+          }
+          const instance = new BasicPitch.BasicPitch(MODEL_URL);
+          return { BasicPitch, instance };
+        } catch (error) {
+          errors.push(`${src}: ${error?.message || error}`);
+        }
+      }
+
+      window.__basicPitchError = errors.join(" | ");
+      console.error("Basic Pitch failed to load:", window.__basicPitchError);
       return null;
-    });
+    })();
   </script>
 
-  <script src="app.js?v=20260920-1"></script>
+  <script src="app.js?v=20260920-2"></script>
 
 </body>
 </html>
