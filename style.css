@@ -1742,6 +1742,57 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 .app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
 
+/* Song actions (⋯) menu — compact rows so more actions fit. If the
+   list ever outgrows the screen, the list itself scrolls while the
+   title and Cancel button stay put. */
+#songActionsModal .modal-card {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--app-vh, 100dvh) - 30px);
+  padding: 16px 16px 14px;
+}
+
+#songActionsModal .modal-card h2 {
+  flex: 0 0 auto;
+  margin: 0 2px 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 17px;
+}
+
+#songActionsModal .library-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 6px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+#songActionsModal .library-item {
+  flex: 0 0 auto;
+  padding: 7px 12px 7px 8px;
+  border-radius: var(--radius-md);
+}
+
+#songActionsModal .library-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: 9px;
+}
+#songActionsModal .library-icon svg { width: 17px; height: 17px; }
+
+#songActionsModal .library-info { margin-left: 12px; }
+#songActionsModal .library-name { font-size: 14.5px; }
+
+#songActionsModal .full-button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  margin-top: 10px;
+}
+
 /* ---------- 9. BOTTOM NAVIGATION ---------- */
 .bottom-nav {
   position: fixed;
