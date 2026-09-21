@@ -1678,6 +1678,70 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .modal-actions { display: flex; gap: 10px; margin-top: 15px; }
 .modal-actions button { flex: 1; }
 
+/* Edit Song sheet */
+.edit-song-hint {
+  margin: -6px 0 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.edit-song-field { display: block; margin-bottom: 12px; }
+
+.edit-song-field > span {
+  display: block;
+  margin: 0 0 6px 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+
+.edit-song-status {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.edit-song-status.warn  { color: #ffb84d; }
+.edit-song-status.error { color: var(--danger); }
+
+.modal-card input:disabled { opacity: .55; }
+.modal-actions .primary-button:disabled { opacity: .55; }
+
+/* "Lyrics not found" marker on a song row — tap to fix the name */
+.song-actions .song-lyrics-flag {
+  width: 32px;
+  color: #ffb84d;
+}
+.song-actions .song-lyrics-flag svg { width: 18px; height: 18px; }
+
+/* Toast */
+.app-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 300;
+  max-width: min(92vw, 420px);
+  box-sizing: border-box;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-lg);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -10px);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
 /* ---------- 9. BOTTOM NAVIGATION ---------- */
 .bottom-nav {
   position: fixed;

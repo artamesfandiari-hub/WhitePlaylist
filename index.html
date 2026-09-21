@@ -28,7 +28,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260920-1">
+  <link rel="stylesheet" href="style.css?v=20260921-1">
 </head>
 
 <body>
@@ -499,6 +499,21 @@
           </button>
 
           <button
+            class="library-item"
+            id="songActionEdit"
+          >
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3Z"></path>
+                <line x1="13.5" y1="8.5" x2="16.5" y2="11.5"></line>
+              </svg>
+            </div>
+            <div class="library-info">
+              <div class="library-name">Edit Song Info</div>
+            </div>
+          </button>
+
+          <button
             class="library-item destructive"
             id="songActionDelete"
           >
@@ -539,6 +554,77 @@
           Cancel
         </button>
 
+      </div>
+    </div>
+
+    <!-- EDIT SONG MODAL -->
+    <div
+      class="modal hidden"
+      id="editSongModal"
+    >
+      <div class="modal-card">
+
+        <h2>Edit Song</h2>
+
+        <p
+          class="edit-song-hint hidden"
+          id="editSongHint"
+        >
+          Lyrics weren't found for this song — the name may be wrong.
+          Fix the title or artist and we'll search again.
+        </p>
+
+        <label class="edit-song-field">
+          <span>Title</span>
+          <input
+            id="editSongTitle"
+            type="text"
+            maxlength="300"
+            dir="auto"
+            autocomplete="off"
+            autocapitalize="words"
+            placeholder="Song title"
+          >
+        </label>
+
+        <label class="edit-song-field">
+          <span>Artist</span>
+          <input
+            id="editSongArtist"
+            type="text"
+            maxlength="300"
+            dir="auto"
+            autocomplete="off"
+            autocapitalize="words"
+            placeholder="Unknown Artist"
+          >
+        </label>
+
+        <div
+          class="edit-song-status hidden"
+          id="editSongStatus"
+          role="status"
+        ></div>
+
+        <div class="modal-actions">
+
+          <button
+            type="button"
+            class="secondary-button"
+            id="cancelEditSong"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            class="primary-button"
+            id="saveEditSong"
+          >
+            Save
+          </button>
+
+        </div>
       </div>
     </div>
 
@@ -996,7 +1082,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260914-8"></script>
+  <script src="app.js?v=20260921-1"></script>
 
 </body>
 </html>

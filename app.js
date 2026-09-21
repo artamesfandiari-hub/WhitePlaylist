@@ -1192,6 +1192,7 @@ function songHTML(song) {
       </button>
 
       <div class="song-actions">
+        ${songHasLyricsIssue(song) ? lyricsFlagHTML(song.id) : ""}
         <button
           class="song-menu-btn"
           data-action="menu"
@@ -1232,6 +1233,7 @@ function bindSongButtons(container, songsList, menuContext = {}) {
 
       if (action === "play") playSong(song, list);
       if (action === "menu") openSongActionsMenu(song, menuContext);
+      if (action === "edit") openEditSongModal(song);
     });
   });
 
@@ -2319,6 +2321,16 @@ function setupModals() {
       closeSongActionsMenu();
       if (song) forwardSong(song);
     });
+
+  document
+    .getElementById("songActionEdit")
+    ?.addEventListener("click", () => {
+      const song = selectedSongForMenu;
+      closeSongActionsMenu();
+      if (song) openEditSongModal(song);
+    });
+
+  setupEditSongModal();
 
   document
     .getElementById("songActionRemoveFromPlaylist")
@@ -4488,6 +4500,7 @@ function loadLyrics(song) {
 
   const cached = lyricsCache.get(song.id);
   if (cached) {
+    if (getLyricsStatus(song) === null) recordLyricsOutcome(song, cached);
     buildLyricsList(cached);
     return;
   }
@@ -4502,6 +4515,7 @@ function loadLyrics(song) {
 
   if (stored) {
     lyricsCache.set(song.id, stored);
+    if (getLyricsStatus(song) === null) recordLyricsOutcome(song, stored);
     buildLyricsList(stored);
     return;
   }
@@ -4512,8 +4526,13 @@ function loadLyrics(song) {
     .then(result => {
       if (token !== lyricsRequestToken) return; // song changed meanwhile
 
-      lyricsCache.set(song.id, result);
-      saveLyricsToStorage(song.id, result);
+      // A transient miss (offline / LRCLIB hiccup) is shown but never
+      // cached or flagged — the next play simply tries again.
+      if (!result.transient) {
+        lyricsCache.set(song.id, result);
+        saveLyricsToStorage(song.id, result);
+        recordLyricsOutcome(song, result);
+      }
 
       buildLyricsList(result);
     })
@@ -4521,9 +4540,7 @@ function loadLyrics(song) {
       console.error("Lyrics:", error);
       if (token !== lyricsRequestToken) return;
 
-      const result = { lines: [], unavailable: true };
-      lyricsCache.set(song.id, result);
-      buildLyricsList(result);
+      buildLyricsList({ lines: [], unavailable: true, transient: true });
     });
 }
 
@@ -4567,15 +4584,24 @@ function pickBestLyricsCandidate(results, duration) {
 // Runs one /api/search call and returns the parsed best match, or
 // null if the request failed / came back empty. Shared by every
 // search-based tier in fetchLyricsFromLRCLIB() below.
-async function searchLRCLIBOnce(params, duration) {
+//
+// `health` is a small shared { failed } object: it's flipped to
+// failed whenever a request errors out or comes back non-OK, so the
+// caller can tell "LRCLIB really has nothing for this name" apart
+// from "we couldn't reach LRCLIB" (see fetchLyricsFromLRCLIB()).
+async function searchLRCLIBOnce(params, duration, health) {
   try {
     const res = await fetch(`${LYRICS_API}/search?${params.toString()}`);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (health) health.failed = true;
+      return null;
+    }
 
     const results = await res.json();
     const best = pickBestLyricsCandidate(results, duration);
     return best ? parseLyricsResponse(best) : null;
   } catch (_) {
+    if (health) health.failed = true;
     return null;
   }
 }
@@ -4592,6 +4618,12 @@ async function searchLRCLIBOnce(params, duration) {
 //   4. /search with the cleaned text as a single "q" query — the
 //      same fuzzy, combined-field search the lrclib.net site itself
 //      uses, so anything findable there is findable here too.
+//
+// When nothing is found, the result is { unavailable: true } — plus
+// `transient: true` if any request along the way failed (offline,
+// timeout, 5xx). A transient miss says nothing about the song's
+// name, so callers must neither cache it nor flag the song as
+// having a lyrics problem.
 async function fetchLyricsFromLRCLIB(song) {
   const title = (song.title || "").trim();
   const artist = (song.artist || "").trim();
@@ -4601,6 +4633,7 @@ async function fetchLyricsFromLRCLIB(song) {
   }
 
   const duration = song.duration ? Math.round(song.duration) : null;
+  const health = { failed: false };
 
   // Tier 1: exact-match /get.
   const getParams = new URLSearchParams({
@@ -4615,15 +4648,21 @@ async function fetchLyricsFromLRCLIB(song) {
       const data = await res.json();
       const parsed = parseLyricsResponse(data);
       if (parsed) return parsed;
+    } else if (res.status !== 404) {
+      // 404 is LRCLIB's normal "no such track" answer; anything else
+      // is a real failure.
+      health.failed = true;
     }
   } catch (_) {
     // fall through to search tiers
+    health.failed = true;
   }
 
   // Tier 2: field-specific /search on the raw title/artist.
   const rawResult = await searchLRCLIBOnce(
     new URLSearchParams({ track_name: title, artist_name: artist }),
-    duration
+    duration,
+    health
   );
   if (rawResult) return rawResult;
 
@@ -4638,7 +4677,8 @@ async function fetchLyricsFromLRCLIB(song) {
         track_name: cleanTitle,
         artist_name: cleanArtist || artist
       }),
-      duration
+      duration,
+      health
     );
     if (cleanedFieldResult) return cleanedFieldResult;
   }
@@ -4646,11 +4686,14 @@ async function fetchLyricsFromLRCLIB(song) {
   const qText = `${cleanArtist || artist} ${cleanTitle || title}`.trim();
   const qResult = await searchLRCLIBOnce(
     new URLSearchParams({ q: qText }),
-    duration
+    duration,
+    health
   );
   if (qResult) return qResult;
 
-  return { lines: [], unavailable: true };
+  return health.failed
+    ? { lines: [], unavailable: true, transient: true }
+    : { lines: [], unavailable: true };
 }
 
 // Turns one LRCLIB record into { lines, unavailable, instrumental? }.
@@ -4901,7 +4944,9 @@ function buildLyricsList(result) {
         ${
           result && result.instrumental
             ? "This track is instrumental."
-            : "Lyrics unavailable for this track."
+            : result && result.transient
+              ? "Couldn't load lyrics right now."
+              : "Lyrics unavailable for this track."
         }
       </div>
     `;
@@ -5312,6 +5357,532 @@ function updateLyricsSync() {
   if (index !== activeLyricsLineIndex) {
     activeLyricsLineIndex = index;
     renderLyricsLine(index);
+  }
+}
+
+/* =========================================================
+   LYRICS STATUS — which songs have a "lyrics problem"
+   ----------------------------------------------------------------
+   A song is flagged as problematic when a real lookup against
+   LRCLIB came back empty (usually because the title/artist is
+   wrong). The flag is remembered per song in localStorage together
+   with a short signature of the title + artist it was checked
+   against, so:
+     - renaming a song (here or from another device) makes the old
+       verdict stale and it simply stops being shown, and
+     - a later successful lookup clears the flag automatically.
+   Instrumental tracks and transient network failures are never
+   flagged (see fetchLyricsFromLRCLIB()).
+   ========================================================= */
+
+const LYRICS_STATUS_KEY = "wp_lyrics_status";
+
+// songId -> [1 | 0, signature]  (1 = lyrics found, 0 = not found)
+let lyricsStatusMap = null;
+
+function lyricsSignature(song) {
+  const norm = value =>
+    String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+  const text = `${norm(song?.title)}|${norm(song?.artist)}`;
+
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function getLyricsStatusMap() {
+  if (lyricsStatusMap) return lyricsStatusMap;
+
+  try {
+    const raw = localStorage.getItem(LYRICS_STATUS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    lyricsStatusMap =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : {};
+  } catch (_) {
+    lyricsStatusMap = {};
+  }
+
+  return lyricsStatusMap;
+}
+
+function persistLyricsStatusMap() {
+  try {
+    localStorage.setItem(
+      LYRICS_STATUS_KEY,
+      JSON.stringify(getLyricsStatusMap())
+    );
+  } catch (_) {
+    // Storage full/unavailable — the flag just lasts for this session.
+  }
+}
+
+// "found" | "missing" | null (never checked, or checked under a
+// different title/artist than the song has now).
+function getLyricsStatus(song) {
+  if (!song || song.id == null) return null;
+
+  const entry = getLyricsStatusMap()[song.id];
+  if (!Array.isArray(entry) || entry[1] !== lyricsSignature(song)) {
+    return null;
+  }
+
+  return entry[0] ? "found" : "missing";
+}
+
+function setLyricsStatus(song, status) {
+  if (!song || song.id == null) return;
+
+  const map = getLyricsStatusMap();
+
+  if (status === "found" || status === "missing") {
+    map[song.id] = [status === "found" ? 1 : 0, lyricsSignature(song)];
+  } else {
+    delete map[song.id];
+  }
+
+  persistLyricsStatusMap();
+}
+
+function songHasLyricsIssue(song) {
+  return getLyricsStatus(song) === "missing";
+}
+
+// Turns a finished lookup into a status. Instrumental tracks count
+// as "found" — LRCLIB knows them, there's nothing wrong with the
+// name. Transient failures record nothing.
+function recordLyricsOutcome(song, result) {
+  if (!song || !result || result.transient) return;
+
+  const missing = result.unavailable && !result.instrumental;
+  setLyricsStatus(song, missing ? "missing" : "found");
+  refreshSongLyricsFlag(song.id, song);
+}
+
+// Forgets everything cached about a song's lyrics (memory,
+// localStorage, and the problem flag) so the next lookup starts
+// from scratch.
+function clearLyricsCache(songId) {
+  lyricsCache.delete(songId);
+
+  try {
+    localStorage.removeItem(lyricsStorageKey(songId));
+
+    const indexRaw = localStorage.getItem("wp_lrc_index");
+    if (indexRaw) {
+      const index = JSON.parse(indexRaw).filter(id => id !== songId);
+      localStorage.setItem("wp_lrc_index", JSON.stringify(index));
+    }
+  } catch (_) {}
+
+  const map = getLyricsStatusMap();
+  if (songId in map) {
+    delete map[songId];
+    persistLyricsStatusMap();
+  }
+}
+
+const LYRICS_FLAG_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3.5 2.8 19.5h18.4L12 3.5Z"></path>
+    <line x1="12" y1="10" x2="12" y2="14"></line>
+    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+  </svg>
+`;
+
+function lyricsFlagHTML(songId) {
+  return `
+    <button
+      class="song-lyrics-flag"
+      data-action="edit"
+      data-id="${songId}"
+      aria-label="Lyrics not found — fix the song name"
+      title="Lyrics not found — tap to fix the name"
+    >
+      ${LYRICS_FLAG_ICON}
+    </button>
+  `;
+}
+
+function findSongAnywhere(id) {
+  const numeric = Number(id);
+  const same = item => item && Number(item.id) === numeric;
+
+  return (
+    state.songs.find(same) ||
+    state.favorites.find(same) ||
+    (same(state.currentSong) ? state.currentSong : null) ||
+    state.queue.find(same) ||
+    null
+  );
+}
+
+// Adds/removes the flag on any row of this song that's already on
+// screen (Songs, Recent, Favorites, …) without re-rendering the
+// list, so scroll position and select-mode state are untouched.
+function refreshSongLyricsFlag(songId, songHint) {
+  // Prefer the caller's object — it's the one just patched/checked.
+  const song = songHint || findSongAnywhere(songId);
+  if (!song) return;
+
+  const hasIssue = songHasLyricsIssue(song);
+
+  document
+    .querySelectorAll(`.song-item[data-song-id="${Number(songId)}"]`)
+    .forEach(row => {
+      const actions = row.querySelector(".song-actions");
+      if (!actions) return;
+
+      const existing = actions.querySelector(".song-lyrics-flag");
+
+      if (hasIssue && !existing) {
+        actions.insertAdjacentHTML("afterbegin", lyricsFlagHTML(song.id));
+
+        actions
+          .querySelector(".song-lyrics-flag")
+          .addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openEditSongModal(song);
+          });
+      } else if (!hasIssue && existing) {
+        existing.remove();
+      }
+    });
+}
+
+// Re-runs the lyrics lookup for `song` using its CURRENT title and
+// artist. Resolves to "found" | "instrumental" | "missing" | "error"
+// ("error" = couldn't reach LRCLIB, so nothing is concluded either
+// way). On success the result is cached, the song's problem flag is
+// updated (a successful match clears it), and — if the song is the
+// one in the player — the lyrics ticker is refreshed in place.
+async function resyncLyrics(song) {
+  if (!song || song.id == null) return "error";
+
+  clearLyricsCache(song.id);
+  refreshSongLyricsFlag(song.id, song);
+
+  const isCurrent = () =>
+    state.currentSong &&
+    Number(state.currentSong.id) === Number(song.id);
+
+  // Invalidates any lookup still in flight for the old name, and
+  // shows progress in the ticker if this song is playing.
+  const token = ++lyricsRequestToken;
+
+  if (isCurrent()) {
+    activeLyricsLineIndex = -1;
+    currentLyricsLines = [];
+
+    const track = document.getElementById("playerLyricsTrack");
+    if (track) {
+      track.dir = "ltr";
+      track.innerHTML =
+        `<div class="player-lyrics-status">Loading lyrics…</div>`;
+    }
+  }
+
+  let result;
+
+  try {
+    result = await fetchLyricsFromLRCLIB(song);
+  } catch (error) {
+    console.error("Lyrics resync:", error);
+    result = { lines: [], unavailable: true, transient: true };
+  }
+
+  if (result.transient) {
+    if (isCurrent() && token === lyricsRequestToken) buildLyricsList(result);
+    return "error";
+  }
+
+  lyricsCache.set(song.id, result);
+  saveLyricsToStorage(song.id, result);
+  recordLyricsOutcome(song, result);
+
+  if (isCurrent() && token === lyricsRequestToken) {
+    // Cache hit — just renders the fresh result in the ticker.
+    loadLyrics(state.currentSong);
+  }
+
+  if (result.instrumental) return "instrumental";
+  return result.unavailable ? "missing" : "found";
+}
+
+/* =========================================================
+   TOAST
+   ========================================================= */
+
+let toastTimer = null;
+
+function showToast(message) {
+  let el = document.getElementById("appToast");
+
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "appToast";
+    el.className = "app-toast";
+    el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+
+  el.textContent = message;
+
+  // Restart the transition if a previous toast is still visible.
+  el.classList.remove("visible");
+  void el.offsetWidth;
+  el.classList.add("visible");
+
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("visible"), 3400);
+}
+
+/* =========================================================
+   EDIT SONG (fix a wrong name → re-sync lyrics)
+   ----------------------------------------------------------------
+   Flow: edit title/artist → PUT /songs/:id → every in-memory copy
+   of the song is updated → the lyrics lookup is re-run with the
+   new name → if lyrics are found the song's problem flag is cleared
+   (see resyncLyrics()). If they still aren't found, the sheet stays
+   open so the name can be adjusted and tried again.
+   ========================================================= */
+
+let editingSong = null;
+let editSongBusy = false;
+let editSongSession = 0;
+
+function collapseSpaces(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function setEditSongStatus(message, kind) {
+  const el = document.getElementById("editSongStatus");
+  if (!el) return;
+
+  el.textContent = message || "";
+  el.classList.toggle("hidden", !message);
+  el.classList.toggle("error", kind === "error");
+  el.classList.toggle("warn", kind === "warn");
+}
+
+function setEditSongBusy(busy) {
+  editSongBusy = busy;
+
+  const saveBtn = document.getElementById("saveEditSong");
+  if (saveBtn) saveBtn.disabled = busy;
+
+  ["editSongTitle", "editSongArtist"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.disabled = busy;
+  });
+}
+
+function openEditSongModal(song) {
+  if (!song) return;
+
+  const modal = document.getElementById("editSongModal");
+  const titleInput = document.getElementById("editSongTitle");
+  const artistInput = document.getElementById("editSongArtist");
+  const hint = document.getElementById("editSongHint");
+  if (!modal || !titleInput || !artistInput) return;
+
+  editingSong = song;
+  editSongSession++;
+
+  titleInput.value = song.title || "";
+  artistInput.value =
+    song.artist && song.artist !== "Unknown Artist" ? song.artist : "";
+
+  setEditSongBusy(false);
+  setEditSongStatus("");
+  hint?.classList.toggle("hidden", !songHasLyricsIssue(song));
+
+  modal.classList.remove("hidden");
+
+  // Only pull up the keyboard straight away when there's something
+  // obviously worth fixing; otherwise let the user tap what they want.
+  if (songHasLyricsIssue(song)) titleInput.focus();
+}
+
+function closeEditSongModal() {
+  editSongSession++; // orphan any request still running for this sheet
+  editingSong = null;
+  setEditSongBusy(false);
+
+  document.getElementById("editSongModal")?.classList.add("hidden");
+}
+
+function setupEditSongModal() {
+  document
+    .getElementById("cancelEditSong")
+    ?.addEventListener("click", closeEditSongModal);
+
+  document
+    .getElementById("saveEditSong")
+    ?.addEventListener("click", saveSongEdit);
+
+  ["editSongTitle", "editSongArtist"].forEach(id => {
+    document.getElementById(id)?.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveSongEdit();
+      }
+    });
+  });
+}
+
+// Copies the server's fresh copy of a song into every in-memory
+// object that represents it (lists, queue, the playing song), since
+// several screens hold their own references.
+function applySongUpdate(updated) {
+  if (!updated) return;
+
+  const id = Number(updated.id);
+  const targets = new Set();
+
+  [state.songs, state.favorites, state.queue].forEach(list => {
+    list.forEach(item => {
+      if (item && Number(item.id) === id) targets.add(item);
+    });
+  });
+
+  if (state.currentSong && Number(state.currentSong.id) === id) {
+    targets.add(state.currentSong);
+  }
+  if (editingSong && Number(editingSong.id) === id) {
+    targets.add(editingSong);
+  }
+
+  targets.forEach(item => Object.assign(item, updated));
+}
+
+function refreshPlayerIdentityAfterEdit(song) {
+  const title = song.title || "Unknown";
+  const artist = song.artist || "Unknown Artist";
+
+  const miniTitle = document.getElementById("miniTitle");
+  const miniArtist = document.getElementById("miniArtist");
+  if (miniTitle) miniTitle.textContent = title;
+  if (miniArtist) miniArtist.textContent = artist;
+
+  setPlayerIdentityText(title, artist);
+  updateMediaSessionMetadata(song);
+}
+
+async function refreshLibraryAfterSongEdit() {
+  await Promise.allSettled([
+    loadSongs(),
+    loadFavorites(),
+    loadArtists(),
+    loadAlbums(),
+    loadPlaylists(),
+    loadHomeInsights()
+  ]);
+
+  renderHomeDashboard();
+}
+
+async function saveSongEdit() {
+  const song = editingSong;
+  if (!song || editSongBusy) return;
+
+  const session = editSongSession;
+  const stillOpen = () => session === editSongSession && editingSong === song;
+
+  const titleInput = document.getElementById("editSongTitle");
+  const artistInput = document.getElementById("editSongArtist");
+
+  const title = collapseSpaces(titleInput.value);
+  const artist = collapseSpaces(artistInput.value);
+
+  if (!title) {
+    setEditSongStatus("The title can't be empty.", "error");
+    titleInput.focus();
+    return;
+  }
+
+  const currentArtist = collapseSpaces(song.artist) || "Unknown Artist";
+  const changed =
+    title !== collapseSpaces(song.title) ||
+    (artist || "Unknown Artist") !== currentArtist;
+
+  setEditSongBusy(true);
+  setEditSongStatus(changed ? "Saving…" : "Searching for lyrics…");
+
+  let reload = Promise.resolve();
+
+  if (changed) {
+    try {
+      const data = await api(`/songs/${song.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ title, artist })
+      });
+
+      applySongUpdate(data.song);
+    } catch (error) {
+      console.error("Edit song:", error);
+
+      if (stillOpen()) {
+        setEditSongBusy(false);
+        setEditSongStatus(error.message || "Couldn't save changes.", "error");
+      }
+      return;
+    }
+
+    if (
+      state.currentSong &&
+      Number(state.currentSong.id) === Number(song.id)
+    ) {
+      refreshPlayerIdentityAfterEdit(state.currentSong);
+    }
+
+    reload = refreshLibraryAfterSongEdit();
+    if (stillOpen()) setEditSongStatus("Saved. Searching for lyrics…");
+  }
+
+  // `song` was patched in place by applySongUpdate(), so this looks
+  // the lyrics up under the corrected name.
+  const [outcome] = await Promise.all([resyncLyrics(song), reload]);
+
+  // Songs that were already on screen may have changed status.
+  refreshSongLyricsFlag(song.id, song);
+
+  if (!stillOpen()) {
+    // The sheet was dismissed while this ran — just report the result.
+    if (outcome === "found") showToast("Lyrics found ✓");
+    return;
+  }
+
+  if (outcome === "missing") {
+    // Keep the sheet open so the name can be adjusted and retried.
+    setEditSongBusy(false);
+    document.getElementById("editSongHint")?.classList.remove("hidden");
+    setEditSongStatus(
+      changed
+        ? "Saved, but no lyrics were found for this name. Adjust the title or artist and try again."
+        : "No lyrics were found for this name. Adjust the title or artist and try again.",
+      "warn"
+    );
+    return;
+  }
+
+  closeEditSongModal();
+
+  if (outcome === "found") {
+    showToast(changed ? "Saved · lyrics found ✓" : "Lyrics found ✓");
+  } else if (outcome === "instrumental") {
+    showToast("Saved · this track is instrumental");
+  } else {
+    showToast(
+      changed
+        ? "Saved. Couldn't reach the lyrics service — it'll retry when you play the song."
+        : "Couldn't reach the lyrics service. Try again in a moment."
+    );
   }
 }
 
