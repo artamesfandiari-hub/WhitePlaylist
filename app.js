@@ -1093,44 +1093,11 @@ function setupSongsSelectMode() {
     });
 }
 
-// Runs `task` over `items` with at most `limit` requests in flight —
-// firing hundreds at once queues behind the browser's connection
-// limit, hits the 20s api() timeout and hammers the Worker/D1.
-async function runLimited(items, limit, task) {
-  let next = 0;
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      while (next < items.length) {
-        const item = items[next++];
-        try { await task(item); } catch (_) {}
-      }
-    }
-  );
-  await Promise.all(workers);
-}
-
-// Deleted songs must not stay in the play queue: reaching one meant
-// a dead stream, three retries and ~6s of silence before skipping.
-function purgeSongsFromQueue(ids) {
-  const gone = new Set(ids.map(Number));
-  const currentId = state.currentSong ? Number(state.currentSong.id) : null;
-  const currentStillQueued = currentId !== null && !gone.has(currentId);
-
-  state.queue = state.queue.filter(item => !gone.has(Number(item.id)));
-
-  state.queueIndex = currentStillQueued
-    ? state.queue.findIndex(item => Number(item.id) === currentId)
-    : -1;
-}
-
 async function bulkDeleteSongs(ids) {
   try {
-    await runLimited(ids, 5, id =>
-      api(`/songs/${id}`, { method: "DELETE" })
+    await Promise.allSettled(
+      ids.map(id => api(`/songs/${id}`, { method: "DELETE" }))
     );
-
-    purgeSongsFromQueue(ids);
 
     if (
       state.currentSong &&
@@ -1182,6 +1149,11 @@ function renderRecentSongs() {
 }
 
 function songHTML(song) {
+  const liked =
+    state.favorites.some(
+      item => Number(item.id) === Number(song.id)
+    );
+
   const artist = song.artist || "Unknown Artist";
   const album = song.album || "Unknown Album";
   const isInPlaylistDetail = song._playlistId !== undefined;
@@ -1373,14 +1345,7 @@ function renderFavoriteSongs() {
   bindSongButtons(container, state.favorites);
 }
 
-let favoriteToggleBusy = false;
-
 async function toggleFavorite(song) {
-  // Rapid double taps used to send two identical requests computed
-  // from the same stale state.
-  if (favoriteToggleBusy) return;
-  favoriteToggleBusy = true;
-
   const liked =
     state.favorites.some(
       item => Number(item.id) === Number(song.id)
@@ -1405,17 +1370,14 @@ async function toggleFavorite(song) {
 
     await loadFavorites();
 
-    // Song rows don't render favorite state, so rebuilding the whole
-    // Songs / Recent lists (hundreds of rows + covers) here was pure
-    // waste — only the surfaces that actually show favorites refresh.
+    renderSongs();
+    renderRecentSongs();
     renderHomeFavorites();
 
     updatePlayerLike();
   } catch (error) {
     console.error("Favorite:", error);
     alert("Couldn't update favorite.");
-  } finally {
-    favoriteToggleBusy = false;
   }
 }
 
@@ -2149,8 +2111,6 @@ async function deleteSong(song) {
       updatePlayButtons();
       miniPlayer?.classList.add("hidden");
       closeFullPlayer();
-    } else {
-      purgeSongsFromQueue([song.id]);
     }
 
     await Promise.allSettled([
@@ -2508,14 +2468,11 @@ function closePlaylistModal() {
     .classList.add("hidden");
 }
 
-let createPlaylistBusy = false;
-
 async function createPlaylist() {
   const input = document.getElementById("playlistName");
   const name = input.value.trim();
 
-  if (!name || createPlaylistBusy) return;
-  createPlaylistBusy = true;
+  if (!name) return;
 
   try {
     const data = await api("/playlists", {
@@ -2535,8 +2492,6 @@ async function createPlaylist() {
   } catch (error) {
     console.error("Create playlist:", error);
     alert(error.message);
-  } finally {
-    createPlaylistBusy = false;
   }
 }
 
@@ -2645,8 +2600,6 @@ const AUDIO_STALL_TIMEOUT_MS = 8000;
 let audioRetryCount = 0;
 let audioRetrySongId = null;
 let audioStallTimer = null;
-let audioConsecutiveGiveUps = 0;
-const AUDIO_MAX_CONSECUTIVE_GIVEUPS = 4;
 
 function clearAudioStallTimer() {
   if (audioStallTimer) {
@@ -2670,17 +2623,6 @@ function retryPlaybackFromError() {
     // indefinitely.
     console.error("Playback: giving up after repeated errors, skipping");
     audioRetryCount = 0;
-
-    // Offline / server down: every song fails the same way. Don't
-    // cycle through the whole queue forever (battery + network).
-    audioConsecutiveGiveUps++;
-    if (audioConsecutiveGiveUps >= AUDIO_MAX_CONSECUTIVE_GIVEUPS) {
-      audioConsecutiveGiveUps = 0;
-      audio.pause();
-      showToast("Playback stopped — check your connection.");
-      return;
-    }
-
     nextSong();
     return;
   }
@@ -2775,42 +2717,16 @@ function setupPlayer() {
     .getElementById("shuffleButton")
     .addEventListener("click", cyclePlaybackMode);
 
-  const progressEl = document.getElementById("progress");
-  let lastScrubSeekAt = 0;
-  let scrubResetTimer = null;
-
-  const seekToProgress = () => {
-    if (!audio.duration) return;
-    audio.currentTime =
-      (Number(progressEl.value) / 100) * audio.duration;
-  };
-
-  // Committed position when the finger/mouse is released.
-  progressEl.addEventListener("change", () => {
-    clearTimeout(scrubResetTimer);
-    progressScrubbing = false;
-    seekToProgress();
-    redrawWaveformProgress();
-  });
-
-  progressEl
+  document
+    .getElementById("progress")
     .addEventListener("input", event => {
       setProgressFill(event.target.value);
 
       if (!audio.duration) return;
 
-      // Every input event used to seek the streamed audio, which
-      // floods the Worker with range requests and stalls playback
-      // while dragging. Seek at most ~5x/second; "change" above
-      // applies the final position.
-      progressScrubbing = true;
-      clearTimeout(scrubResetTimer);
-      scrubResetTimer = setTimeout(() => { progressScrubbing = false; }, 1200);
-      const now = performance.now();
-      if (now - lastScrubSeekAt < 200) return;
-      lastScrubSeekAt = now;
-
-      seekToProgress();
+      audio.currentTime =
+        (Number(event.target.value) / 100) *
+        audio.duration;
 
       // Visual-only: repaint the already-cached waveform bars to
       // reflect the new position while scrubbing. Does not touch
@@ -2879,7 +2795,6 @@ function setupPlayer() {
   audio.addEventListener("playing", () => {
     clearAudioStallTimer();
     audioRetryCount = 0;
-    audioConsecutiveGiveUps = 0;
   });
 
   // Waveform canvas is sized off its own rendered box, so it needs a
@@ -3713,13 +3628,8 @@ function setProgressFill(percent) {
   if (bar) bar.style.setProperty("--fill", `${percent}%`);
 }
 
-let progressScrubbing = false;
-
 function updateProgress() {
   if (!audio.duration) return;
-
-  // Don't fight the user's thumb while they're dragging the slider.
-  if (progressScrubbing) return;
 
   const percent =
     (audio.currentTime / audio.duration) * 100;
@@ -3782,10 +3692,6 @@ const WAVEFORM_BAR_COUNT = 96;
 // approximate) waveform shape while keeping the decode cost small
 // and constant regardless of the track's actual length.
 const WAVEFORM_LITE_BYTE_CAP = 900 * 1024;
-
-// Above either limit the full file is never decoded (see loadWaveform()).
-const WAVEFORM_MAX_FULL_DECODE_SECONDS = 15 * 60;
-const WAVEFORM_MAX_FULL_DECODE_BYTES = 40 * 1024 * 1024;
 
 // song.id -> Array<number> peaks (0..1), in-memory for this session
 const waveformCache = new Map();
@@ -3891,14 +3797,6 @@ function loadWaveform(song) {
 
   const token = ++waveformRequestToken;
 
-  // A download for a previous song must never keep running (and
-  // eating bandwidth/memory) once a new song has taken over —
-  // including when the new song's waveform is already cached.
-  if (waveformAbortController) {
-    waveformAbortController.abort();
-    waveformAbortController = null;
-  }
-
   const memCached = waveformCache.get(song.id);
   if (memCached) {
     drawWaveform(memCached);
@@ -3907,7 +3805,7 @@ function loadWaveform(song) {
   }
 
   const stored = loadWaveformFromStorage(song.id);
-  if (stored && stored.main && stored.main.length) {
+  if (stored && stored.length) {
     waveformCache.set(song.id, stored);
     drawWaveform(stored);
     setWaveformState("ready");
@@ -3950,16 +3848,6 @@ function loadWaveform(song) {
     (typeof navigator.deviceMemory === "number" && navigator.deviceMemory <= 2) ||
     (typeof navigator.hardwareConcurrency === "number" && navigator.hardwareConcurrency <= 2);
 
-  // Decoding a very long/large file into raw PCM needs hundreds of MB
-  // (a 5 min stereo track is ~100MB, an hour-long mix >1GB) and is what
-  // makes the WebView run out of memory and reload. Treat those like a
-  // low-end device: only a capped slice is fetched/decoded.
-  const knownDuration = Number(song.duration) || 0;
-  const knownSize = Number(song.file_size) || 0;
-  const tooBigToDecode =
-    knownDuration > WAVEFORM_MAX_FULL_DECODE_SECONDS ||
-    knownSize > WAVEFORM_MAX_FULL_DECODE_BYTES;
-
   setWaveformState("loading");
   drawWaveform(null); // clear any previous song's bars immediately
 
@@ -3993,7 +3881,7 @@ function loadWaveform(song) {
       // metadata), so this is a normal partial request, not a hack.
       // Starting at byte 0 keeps the format's header in the slice so
       // decodeAudioData has what it needs for both MP3 and FLAC.
-      headers: (lowEndDevice || tooBigToDecode)
+      headers: lowEndDevice
         ? { Range: `bytes=0-${WAVEFORM_LITE_BYTE_CAP - 1}` }
         : undefined
     })
@@ -4143,76 +4031,16 @@ function onePoleHighPass(channel, sampleRate, cutoffHz) {
 function computeWaveformBands(audioBuffer, barCount) {
   const channel = audioBuffer.getChannelData(0);
   const sampleRate = audioBuffer.sampleRate;
-  const length = channel.length;
 
-  // Same filters and same per-bar max as before, but evaluated sample
-  // by sample in ONE pass while tracking each bar's peak, instead of
-  // materialising bass/treble/mid as three (plus temp) full-length
-  // Float32Arrays — for a 5 min track that was ~200MB of extra
-  // allocations on top of the decoded PCM.
-  const dt = 1 / sampleRate;
-  const rcLow200 = 1 / (2 * Math.PI * 200);
-  const rcLow4k = 1 / (2 * Math.PI * 4000);
-  const aLow200 = dt / (rcLow200 + dt);
-  const aLow4k = dt / (rcLow4k + dt);
-  const aHigh4k = rcLow4k / (rcLow4k + dt);
-  const aHigh200 = rcLow200 / (rcLow200 + dt);
-
-  const samplesPerBar = Math.max(1, Math.floor(length / barCount));
-  const stride = Math.max(1, Math.floor(samplesPerBar / 300));
-
-  const main = new Float32Array(barCount);
-  const bass = new Float32Array(barCount);
-  const mid = new Float32Array(barCount);
-  const treble = new Float32Array(barCount);
-
-  let bassPrev = 0;
-  let midLowPrev = 0;
-  let midPrevIn = 0;
-  let midPrevOut = 0;
-  let trebPrevIn = length ? channel[0] : 0;
-  let trebPrevOut = 0;
-
-  for (let i = 0; i < length; i++) {
-    const x = channel[i];
-
-    bassPrev += aLow200 * (x - bassPrev);
-
-    midLowPrev += aLow4k * (x - midLowPrev);
-    midPrevOut = aHigh200 * (midPrevOut + midLowPrev - midPrevIn);
-    midPrevIn = midLowPrev;
-
-    trebPrevOut = aHigh4k * (trebPrevOut + x - trebPrevIn);
-    trebPrevIn = x;
-
-    const bar = Math.floor(i / samplesPerBar);
-    if (bar >= barCount) continue;
-    if ((i - bar * samplesPerBar) % stride !== 0) continue;
-
-    const ax = x < 0 ? -x : x;
-    const ab = bassPrev < 0 ? -bassPrev : bassPrev;
-    const am = midPrevOut < 0 ? -midPrevOut : midPrevOut;
-    const at = trebPrevOut < 0 ? -trebPrevOut : trebPrevOut;
-
-    if (ax > main[bar]) main[bar] = ax;
-    if (ab > bass[bar]) bass[bar] = ab;
-    if (am > mid[bar]) mid[bar] = am;
-    if (at > treble[bar]) treble[bar] = at;
-  }
-
-  const normalize = arr => {
-    let loudest = 0.0001;
-    for (let i = 0; i < arr.length; i++) if (arr[i] > loudest) loudest = arr[i];
-    const out = new Array(arr.length);
-    for (let i = 0; i < arr.length; i++) out[i] = Math.min(1, arr[i] / loudest);
-    return out;
-  };
+  const bass = onePoleLowPass(channel, sampleRate, 200);
+  const treble = onePoleHighPass(channel, sampleRate, 4000);
+  const mid = onePoleHighPass(onePoleLowPass(channel, sampleRate, 4000), sampleRate, 200);
 
   return {
-    main: normalize(main),
-    bass: normalize(bass),
-    mid: normalize(mid),
-    treble: normalize(treble)
+    main: extractPeaksFromChannel(channel, barCount),
+    bass: extractPeaksFromChannel(bass, barCount),
+    mid: extractPeaksFromChannel(mid, barCount),
+    treble: extractPeaksFromChannel(treble, barCount)
   };
 }
 
@@ -4343,11 +4171,6 @@ function waveformBandColor(alpha) {
 // Called from the existing "timeupdate"/"input" handling — no new
 // listeners. Purely a repaint of already-cached peaks.
 function redrawWaveformProgress() {
-  // The canvas has no size while the full player is closed, and
-  // reading its rect every animation frame forces a layout for
-  // nothing. openFullPlayer() repaints once when it opens.
-  if (playerOverlay.classList.contains("hidden")) return;
-
   if (lastWaveformPeaks) {
     drawWaveform(lastWaveformPeaks);
   }
@@ -4611,7 +4434,6 @@ const LYRICS_API = "https://lrclib.net/api";
 const lyricsCache = new Map();
 
 let lyricsRequestToken = 0;
-let lyricsAbortController = null;
 let activeLyricsLineIndex = -1;
 
 // The synced lines for whatever song is currently loaded — kept as
@@ -4673,12 +4495,6 @@ function loadLyrics(song) {
   const track = document.getElementById("playerLyricsTrack");
   if (!track) return;
 
-  // Stop any lookup still running for the previous song.
-  if (lyricsAbortController) {
-    lyricsAbortController.abort();
-    lyricsAbortController = null;
-  }
-
   activeLyricsLineIndex = -1;
   currentLyricsLines = [];
 
@@ -4706,9 +4522,7 @@ function loadLyrics(song) {
 
   track.innerHTML = `<div class="player-lyrics-status">Loading lyrics…</div>`;
 
-  lyricsAbortController = new AbortController();
-
-  fetchLyricsFromLRCLIB(song, lyricsAbortController.signal)
+  fetchLyricsFromLRCLIB(song)
     .then(result => {
       if (token !== lyricsRequestToken) return; // song changed meanwhile
 
@@ -4775,27 +4589,9 @@ function pickBestLyricsCandidate(results, duration) {
 // failed whenever a request errors out or comes back non-OK, so the
 // caller can tell "LRCLIB really has nothing for this name" apart
 // from "we couldn't reach LRCLIB" (see fetchLyricsFromLRCLIB()).
-// fetch() with a hard timeout and an optional cancel signal, so a slow
-// or dead lyrics server can't leave requests hanging, and lookups for
-// a song the user already skipped stop instead of running all tiers.
-function lrcFetch(url, signal) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-  const onAbort = () => controller.abort();
-  if (signal) {
-    if (signal.aborted) controller.abort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-  }
-  return fetch(url, { signal: controller.signal }).finally(() => {
-    clearTimeout(timeoutId);
-    if (signal) signal.removeEventListener("abort", onAbort);
-  });
-}
-
-async function searchLRCLIBOnce(params, duration, health, signal) {
-  if (signal && signal.aborted) return null;
+async function searchLRCLIBOnce(params, duration, health) {
   try {
-    const res = await lrcFetch(`${LYRICS_API}/search?${params.toString()}`, signal);
+    const res = await fetch(`${LYRICS_API}/search?${params.toString()}`);
     if (!res.ok) {
       if (health) health.failed = true;
       return null;
@@ -4828,7 +4624,7 @@ async function searchLRCLIBOnce(params, duration, health, signal) {
 // timeout, 5xx). A transient miss says nothing about the song's
 // name, so callers must neither cache it nor flag the song as
 // having a lyrics problem.
-async function fetchLyricsFromLRCLIB(song, signal) {
+async function fetchLyricsFromLRCLIB(song) {
   const title = (song.title || "").trim();
   const artist = (song.artist || "").trim();
 
@@ -4847,7 +4643,7 @@ async function fetchLyricsFromLRCLIB(song, signal) {
   if (duration) getParams.set("duration", String(duration));
 
   try {
-    const res = await lrcFetch(`${LYRICS_API}/get?${getParams.toString()}`, signal);
+    const res = await fetch(`${LYRICS_API}/get?${getParams.toString()}`);
     if (res.ok) {
       const data = await res.json();
       const parsed = parseLyricsResponse(data);
@@ -4866,11 +4662,9 @@ async function fetchLyricsFromLRCLIB(song, signal) {
   const rawResult = await searchLRCLIBOnce(
     new URLSearchParams({ track_name: title, artist_name: artist }),
     duration,
-    health,
-    signal
+    health
   );
   if (rawResult) return rawResult;
-  if (signal && signal.aborted) return { lines: [], unavailable: true, transient: true };
 
   // Tier 3 & 4: only worth trying if cleaning actually changed
   // something — otherwise they'd just repeat tier 2's query.
@@ -4884,19 +4678,16 @@ async function fetchLyricsFromLRCLIB(song, signal) {
         artist_name: cleanArtist || artist
       }),
       duration,
-      health,
-      signal
+      health
     );
     if (cleanedFieldResult) return cleanedFieldResult;
-    if (signal && signal.aborted) return { lines: [], unavailable: true, transient: true };
   }
 
   const qText = `${cleanArtist || artist} ${cleanTitle || title}`.trim();
   const qResult = await searchLRCLIBOnce(
     new URLSearchParams({ q: qText }),
     duration,
-    health,
-    signal
+    health
   );
   if (qResult) return qResult;
 
@@ -6129,11 +5920,8 @@ function setupSearch() {
   });
 }
 
-let searchToken = 0;
-
 async function search(query) {
   const q = query.trim();
-  const token = ++searchToken;
 
   if (!q) {
     showPage("homePage");
@@ -6143,10 +5931,6 @@ async function search(query) {
   try {
     const data =
       await api(`/search?q=${encodeURIComponent(q)}`);
-
-    // A slower, older response must never overwrite a newer one (or
-    // yank the user to the results page after they cleared the box).
-    if (token !== searchToken) return;
 
     const results = data.songs || [];
 
