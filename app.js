@@ -57,6 +57,10 @@ const state = {
       ? String(tg.initDataUnsafe.user.id)
       : null,
 
+  // Set by loadUserLanguage() in init(), before anything renders.
+  // "en" until then / if that request fails.
+  lang: "en",
+
   songs: [],
   favorites: [],
   artists: [],
@@ -322,12 +326,229 @@ async function api(endpoint, options = {}) {
 }
 
 /* =========================================================
+   I18N
+   ----------------------------------------------------------
+   Two languages: English (default) and Persian — set once per
+   session from the user's saved preference (picked in the bot;
+   see /api/v1/user). This only swaps text — the layout stays
+   left-to-right either way, and "White Playlist" (the brand,
+   the page <title>, and the header wordmark) is never
+   translated. Covers the app's static chrome (tagged in
+   index.html with data-i18n / data-i18n-placeholder /
+   data-i18n-aria / data-i18n-count) plus a few strings built at
+   runtime (the home greeting, the selection-count pill).
+   ========================================================= */
+
+const I18N = {
+  en: {
+    subtitle: "Your music library",
+    ariaSearch: "Search",
+    searchPlaceholder: "Search songs, artists or albums...",
+    homeSubtitle: "Here is your music.",
+    smartMixLabel: "✨ Smart Mix",
+    madeForYou: "Made for you",
+    continueListening: "Continue Listening",
+    recentlyPlayed: "Recently Played",
+    mostPlayed: "Most Played",
+    topArtists: "Your Top Artists",
+    yourPlaylists: "Your Playlists",
+    seeAll: "See all",
+    sharePlaylistsPrompt: "🔗 Share your playlists with friends",
+    yourFavorites: "Your Favorites",
+    pickedForYou: "Picked For You",
+    recentlyAdded: "Recently Added",
+    loading: "Loading...",
+    songsTitle: "Songs",
+    ariaSelectSongs: "Select songs",
+    ariaDeleteAllSongs: "Delete all songs",
+    ariaSortSongs: "Sort songs",
+    sortTitle: "Title (A–Z)",
+    sortArtist: "Artist (A–Z)",
+    addToPlaylist: "Add to Playlist",
+    deleteWord: "Delete",
+    cancel: "Cancel",
+    favoritesTitle: "Favorites",
+    noFavoritesYet: "No favorite songs yet.",
+    artistsTitle: "Artists",
+    albumsTitle: "Albums",
+    playlistsTitle: "Playlists",
+    ariaCreatePlaylist: "Create playlist",
+    homeWord: "Home",
+    searchTitle: "Search",
+    searchEmpty: "Search for a song, artist or album.",
+    songWord: "Song",
+    favoriteWord: "Favorite",
+    forwardWord: "Forward",
+    editSongInfo: "Edit Song Info",
+    removeFromPlaylist: "Remove from Playlist",
+    editSongTitle2: "Edit Song",
+    editSongHint:
+      "Lyrics weren't found for this song — the name may be wrong. Fix the title or artist and we'll search again.",
+    titleWord: "Title",
+    songTitlePlaceholder: "Song title",
+    artistWord: "Artist",
+    unknownArtist: "Unknown Artist",
+    saveWord: "Save",
+    upNext: "Up Next",
+    queueEmpty: "Queue is empty.",
+    closeWord: "Close",
+    confirmWord: "Confirm",
+    nothingPlaying: "Nothing playing",
+    playWord: "Play",
+    ariaClosePlayer: "Close player",
+    ariaTrackOptions: "Track options",
+    shuffleWord: "Shuffle",
+    previousWord: "Previous",
+    nextWord: "Next",
+    createPlaylistTitle: "Create Playlist",
+    ariaChoosePlaylistCover: "Choose playlist cover",
+    addCover: "Add cover",
+    playlistNamePlaceholder: "Playlist name",
+    createWord: "Create",
+    playlistNavWord: "Playlist",
+    selectedCount: n => `${n} selected`,
+    goodNight: "Good night",
+    goodMorning: "Good morning",
+    goodAfternoon: "Good afternoon",
+    goodEvening: "Good evening"
+  },
+  fa: {
+    subtitle: "کتابخونه‌ی موزیک تو",
+    ariaSearch: "جستجو",
+    searchPlaceholder: "جستجوی آهنگ، هنرمند یا آلبوم...",
+    homeSubtitle: "بیا موزیکاتو ببین.",
+    smartMixLabel: "✨ میکس هوشمند",
+    madeForYou: "مخصوص خودت",
+    continueListening: "ادامه‌ی گوش دادن",
+    recentlyPlayed: "اخیراً پخش‌شده",
+    mostPlayed: "پرطرفدارترین‌ها",
+    topArtists: "هنرمندهای محبوبت",
+    yourPlaylists: "پلی‌لیست‌های تو",
+    seeAll: "مشاهده‌ی همه",
+    sharePlaylistsPrompt: "🔗 پلی‌لیست‌هاتو با دوستات به اشتراک بذار",
+    yourFavorites: "علاقه‌مندی‌های تو",
+    pickedForYou: "مخصوص تو",
+    recentlyAdded: "اخیراً اضافه‌شده",
+    loading: "در حال بارگذاری...",
+    songsTitle: "آهنگ‌ها",
+    ariaSelectSongs: "انتخاب آهنگ‌ها",
+    ariaDeleteAllSongs: "حذف همه‌ی آهنگ‌ها",
+    ariaSortSongs: "مرتب‌سازی آهنگ‌ها",
+    sortTitle: "عنوان (آ–ی)",
+    sortArtist: "هنرمند (آ–ی)",
+    addToPlaylist: "افزودن به پلی‌لیست",
+    deleteWord: "حذف",
+    cancel: "لغو",
+    favoritesTitle: "علاقه‌مندی‌ها",
+    noFavoritesYet: "هنوز آهنگ علاقه‌مندی نداری.",
+    artistsTitle: "هنرمندها",
+    albumsTitle: "آلبوم‌ها",
+    playlistsTitle: "پلی‌لیست‌ها",
+    ariaCreatePlaylist: "ساخت پلی‌لیست",
+    homeWord: "خانه",
+    searchTitle: "جستجو",
+    searchEmpty: "دنبال یه آهنگ، هنرمند یا آلبوم بگرد.",
+    songWord: "آهنگ",
+    favoriteWord: "علاقه‌مندی",
+    forwardWord: "فوروارد",
+    editSongInfo: "ویرایش اطلاعات آهنگ",
+    removeFromPlaylist: "حذف از پلی‌لیست",
+    editSongTitle2: "ویرایش آهنگ",
+    editSongHint:
+      "برای این آهنگ متنی پیدا نشد — شاید اسمش اشتباهه. عنوان یا هنرمند رو درست کن تا دوباره جستجو کنیم.",
+    titleWord: "عنوان",
+    songTitlePlaceholder: "عنوان آهنگ",
+    artistWord: "هنرمند",
+    unknownArtist: "هنرمند نامشخص",
+    saveWord: "ذخیره",
+    upNext: "بعدی توی صف",
+    queueEmpty: "صف خالیه.",
+    closeWord: "بستن",
+    confirmWord: "تأیید",
+    nothingPlaying: "چیزی در حال پخش نیست",
+    playWord: "پخش",
+    ariaClosePlayer: "بستن پلیر",
+    ariaTrackOptions: "گزینه‌های آهنگ",
+    shuffleWord: "پخش تصادفی",
+    previousWord: "قبلی",
+    nextWord: "بعدی",
+    createPlaylistTitle: "ساخت پلی‌لیست",
+    ariaChoosePlaylistCover: "انتخاب کاور پلی‌لیست",
+    addCover: "افزودن کاور",
+    playlistNamePlaceholder: "اسم پلی‌لیست",
+    createWord: "ساخت",
+    playlistNavWord: "پلی‌لیست",
+    selectedCount: n => `${n} تا انتخاب شده`,
+    goodNight: "شب بخیر",
+    goodMorning: "صبح بخیر",
+    goodAfternoon: "ظهر بخیر",
+    goodEvening: "عصر بخیر"
+  }
+};
+
+function t(key) {
+  const dict = I18N[state.lang] || I18N.en;
+  return dict[key] !== undefined ? dict[key] : I18N.en[key];
+}
+
+// Fetches the user's saved language preference (set in the bot's
+// first-run picker / 🌐 Language button) so the Mini App opens
+// already in the right language. Defaults to English — both for a
+// brand-new user who hasn't picked yet, and if this request fails
+// for any reason, so the app is never left showing raw i18n keys.
+async function loadUserLanguage() {
+  try {
+    const data = await api("/user");
+    state.lang = data?.user?.language === "fa" ? "fa" : "en";
+  } catch (_) {
+    state.lang = "en";
+  }
+}
+
+// Walks every element tagged in index.html and fills in its text /
+// placeholder / aria-label / selection-count from I18N above. Safe
+// to call more than once (e.g. if language ever changes mid-session
+// down the line) — it always re-reads from the dictionary rather
+// than toggling state.
+function applyI18n() {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const value = t(el.getAttribute("data-i18n"));
+    if (typeof value === "string") el.textContent = value;
+  });
+
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+    const value = t(el.getAttribute("data-i18n-placeholder"));
+    if (typeof value === "string") el.placeholder = value;
+  });
+
+  document.querySelectorAll("[data-i18n-aria]").forEach(el => {
+    const value = t(el.getAttribute("data-i18n-aria"));
+    if (typeof value === "string") el.setAttribute("aria-label", value);
+  });
+
+  // data-i18n-count elements (currently just the selection-count
+  // pill) start at "0" until setupSongsSelectMode()'s own render
+  // pass overwrites them with the live count — this just makes sure
+  // that first paint isn't stuck in English while the count is 0.
+  document.querySelectorAll("[data-i18n-count]").forEach(el => {
+    const fn = I18N[state.lang]?.[el.getAttribute("data-i18n-count")];
+    if (typeof fn === "function") el.textContent = fn(0);
+  });
+}
+
+/* =========================================================
    INIT
    ========================================================= */
 
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  // Must happen before anything below renders any text, so the
+  // very first paint is already in the right language instead of
+  // flashing English first.
+  await loadUserLanguage();
+  applyI18n();
+
   setupNavigation();
   setupSearch();
   setupPlayer();
@@ -541,10 +762,10 @@ function renderHomeGreeting() {
   const hour = new Date().getHours();
 
   const timeGreeting =
-    hour < 5 ? "Good night" :
-    hour < 12 ? "Good morning" :
-    hour < 18 ? "Good afternoon" :
-    "Good evening";
+    hour < 5 ? t("goodNight") :
+    hour < 12 ? t("goodMorning") :
+    hour < 18 ? t("goodAfternoon") :
+    t("goodEvening");
 
   const firstName =
     tg?.initDataUnsafe?.user?.first_name || null;
@@ -1028,7 +1249,7 @@ function updateSongsSelectBar() {
   if (!bar || !countEl) return;
 
   const n = selectedSongIds.size;
-  countEl.textContent = `${n} selected`;
+  countEl.textContent = t("selectedCount")(n);
   bar.classList.toggle("hidden", !songsSelectMode);
 }
 
