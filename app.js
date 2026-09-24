@@ -387,7 +387,11 @@ const I18N = {
     titleWord: "Title",
     songTitlePlaceholder: "Song title",
     artistWord: "Artist",
+    unknown: "Unknown",
     unknownArtist: "Unknown Artist",
+    unknownAlbum: "Unknown Album",
+    untitledPlaylist: "Untitled Playlist",
+    thisSongWord: "this song",
     saveWord: "Save",
     upNext: "Up Next",
     queueEmpty: "Queue is empty.",
@@ -410,7 +414,75 @@ const I18N = {
     goodNight: "Good night",
     goodMorning: "Good morning",
     goodAfternoon: "Good afternoon",
-    goodEvening: "Good evening"
+    goodEvening: "Good evening",
+
+    // Alerts / toasts
+    smartMixNeedsSongs:
+      "Send a few songs to White Playlist first, then Smart Mix can build a queue for you.",
+    deletedSongsCount: n => `Deleted ${n} song${n === 1 ? "" : "s"}.`,
+    couldntUpdateFavorite: "Couldn't update favorite.",
+    couldntUpdateCover: "Couldn't update the cover. Try a different photo.",
+    linkCopied: "Link copied.",
+    deletedNamed: title => `Deleted "${title}".`,
+    allSongsDeleted: "All songs deleted.",
+    forwardNeedsTelegram:
+      "Forwarding requires opening White Playlist from Telegram.",
+    couldntForwardSong: "Couldn't forward song.",
+    couldntOpenTelegramSharing: "Couldn't open Telegram sharing.",
+    deletedPlaylistNamed: name =>
+      `Deleted "${name}". Songs remain in your library.`,
+    removedFromPlaylistToast: "Removed from playlist.",
+    couldntUseImage: "Couldn't use that image. Try a different photo.",
+    addedSongsToPlaylist: n => `Added ${n} songs to playlist.`,
+    couldntGenerateSmartMix: "Couldn't generate Smart Mix.",
+    couldntDeleteSongs: "Couldn't delete songs.",
+    couldntLoadPlaylist: "Couldn't load playlist.",
+    couldntUpdateSharing: "Couldn't update sharing.",
+    playlistLinkInvalid:
+      "This playlist link is invalid or no longer shared.",
+    couldntSavePlaylist: "Couldn't save this playlist.",
+    couldntDeleteSong: "Couldn't delete song.",
+    couldntDeleteAllSongs: "Couldn't delete all songs.",
+    couldntDeletePlaylist: "Couldn't delete playlist.",
+    couldntRemoveSong: "Couldn't remove song.",
+    couldntSaveChanges: "Couldn't save changes.",
+
+    // Lyrics toasts / status lines
+    lyricsFound: "Lyrics found ✓",
+    savedLyricsFound: "Saved · lyrics found ✓",
+    savedInstrumental: "Saved · this track is instrumental",
+    lyricsRetryOnPlay:
+      "Saved. Couldn't reach the lyrics service — it'll retry when you play the song.",
+    lyricsUnavailableRetry:
+      "Couldn't reach the lyrics service. Try again in a moment.",
+    titleCantBeEmpty: "The title can't be empty.",
+    savingEllipsis: "Saving…",
+    searchingLyrics: "Searching for lyrics…",
+    savedSearchingLyrics: "Saved. Searching for lyrics…",
+    savedNoLyricsAdjust:
+      "Saved, but no lyrics were found for this name. Adjust the title or artist and try again.",
+    noLyricsAdjust:
+      "No lyrics were found for this name. Adjust the title or artist and try again.",
+
+    // Confirmation dialogs
+    confirmDeleteSongsTitle: "Delete Songs",
+    confirmDeleteSongsMsg: n =>
+      `Delete ${n} song${n === 1 ? "" : "s"}? This removes them from your library, playlists and favorites.`,
+    confirmDeletePlaylistTitle: "Delete Playlist",
+    confirmDeletePlaylistMsg: name =>
+      `Delete "${name}"? Songs remain in your library.`,
+    confirmStopSharingTitle: "Stop Sharing",
+    confirmStopSharingMsg:
+      "The link will stop working. Your playlist itself is unaffected, and you can share it again anytime.",
+    confirmDeleteSongTitle: "Delete Song",
+    confirmDeleteSongMsg: title =>
+      `Delete "${title}"? This removes the song from your library.`,
+    confirmRemoveFromPlaylistTitle: "Remove from Playlist",
+    confirmRemoveFromPlaylistMsg: title =>
+      `Remove "${title}" from this playlist? The song stays in your library.`,
+    confirmDeleteAllSongsTitle: "Delete All Songs",
+    confirmDeleteAllSongsMsg:
+      "Delete all songs from your library? This cannot be undone and will remove them from playlists and favorites too."
   },
   fa: {
     subtitle: "کتابخونه‌ی موزیک تو",
@@ -459,7 +531,11 @@ const I18N = {
     titleWord: "عنوان",
     songTitlePlaceholder: "عنوان آهنگ",
     artistWord: "هنرمند",
+    unknown: "نامشخص",
     unknownArtist: "هنرمند نامشخص",
+    unknownAlbum: "آلبوم نامشخص",
+    untitledPlaylist: "پلی‌لیست بی‌عنوان",
+    thisSongWord: "این آهنگ",
     saveWord: "ذخیره",
     upNext: "بعدی توی صف",
     queueEmpty: "صف خالیه.",
@@ -482,7 +558,75 @@ const I18N = {
     goodNight: "شب بخیر",
     goodMorning: "صبح بخیر",
     goodAfternoon: "ظهر بخیر",
-    goodEvening: "عصر بخیر"
+    goodEvening: "عصر بخیر",
+
+    // Alerts / toasts
+    smartMixNeedsSongs:
+      "اول چندتا آهنگ به White Playlist بفرست، بعدش میکس هوشمند می‌تونه برات یه صف بسازه.",
+    deletedSongsCount: n => `${n} تا آهنگ حذف شد.`,
+    couldntUpdateFavorite: "نشد علاقه‌مندی رو آپدیت کنم.",
+    couldntUpdateCover: "نشد کاور رو آپدیت کنم. یه عکس دیگه امتحان کن.",
+    linkCopied: "لینک کپی شد.",
+    deletedNamed: title => `"${title}" حذف شد.`,
+    allSongsDeleted: "همه‌ی آهنگ‌ها حذف شدن.",
+    forwardNeedsTelegram:
+      "برای فوروارد کردن باید White Playlist رو از داخل تلگرام باز کنی.",
+    couldntForwardSong: "نشد آهنگ رو فوروارد کنم.",
+    couldntOpenTelegramSharing: "نشد صفحه‌ی اشتراک‌گذاری تلگرام رو باز کنم.",
+    deletedPlaylistNamed: name =>
+      `پلی‌لیست "${name}" حذف شد. آهنگ‌ها توی کتابخونه‌ت می‌مونن.`,
+    removedFromPlaylistToast: "از پلی‌لیست حذف شد.",
+    couldntUseImage: "نشد از این عکس استفاده کنم. یه عکس دیگه امتحان کن.",
+    addedSongsToPlaylist: n => `${n} تا آهنگ به پلی‌لیست اضافه شد.`,
+    couldntGenerateSmartMix: "نشد میکس هوشمند بسازم.",
+    couldntDeleteSongs: "نشد آهنگ‌ها رو حذف کنم.",
+    couldntLoadPlaylist: "نشد پلی‌لیست رو بارگذاری کنم.",
+    couldntUpdateSharing: "نشد وضعیت اشتراک‌گذاری رو آپدیت کنم.",
+    playlistLinkInvalid:
+      "این لینک پلی‌لیست معتبر نیست یا دیگه به اشتراک گذاشته نمی‌شه.",
+    couldntSavePlaylist: "نشد این پلی‌لیست رو ذخیره کنم.",
+    couldntDeleteSong: "نشد آهنگ رو حذف کنم.",
+    couldntDeleteAllSongs: "نشد همه‌ی آهنگ‌ها رو حذف کنم.",
+    couldntDeletePlaylist: "نشد پلی‌لیست رو حذف کنم.",
+    couldntRemoveSong: "نشد آهنگ رو حذف کنم.",
+    couldntSaveChanges: "نشد تغییرات رو ذخیره کنم.",
+
+    // Lyrics toasts / status lines
+    lyricsFound: "متن آهنگ پیدا شد ✓",
+    savedLyricsFound: "ذخیره شد · متن آهنگ پیدا شد ✓",
+    savedInstrumental: "ذخیره شد · این آهنگ بی‌کلامه",
+    lyricsRetryOnPlay:
+      "ذخیره شد. نشد به سرویس متن آهنگ وصل بشم — وقتی آهنگ رو پلی کنی دوباره امتحان می‌کنم.",
+    lyricsUnavailableRetry:
+      "نشد به سرویس متن آهنگ وصل بشم. چند لحظه‌ی دیگه دوباره امتحان کن.",
+    titleCantBeEmpty: "عنوان نمی‌تونه خالی باشه.",
+    savingEllipsis: "در حال ذخیره…",
+    searchingLyrics: "در حال جستجوی متن آهنگ…",
+    savedSearchingLyrics: "ذخیره شد. در حال جستجوی متن آهنگ…",
+    savedNoLyricsAdjust:
+      "ذخیره شد، ولی متنی برای این اسم پیدا نشد. عنوان یا هنرمند رو درست کن و دوباره امتحان کن.",
+    noLyricsAdjust:
+      "متنی برای این اسم پیدا نشد. عنوان یا هنرمند رو درست کن و دوباره امتحان کن.",
+
+    // Confirmation dialogs
+    confirmDeleteSongsTitle: "حذف آهنگ‌ها",
+    confirmDeleteSongsMsg: n =>
+      `${n} تا آهنگ حذف بشه؟ از کتابخونه، پلی‌لیست‌ها و علاقه‌مندی‌هات حذف می‌شه.`,
+    confirmDeletePlaylistTitle: "حذف پلی‌لیست",
+    confirmDeletePlaylistMsg: name =>
+      `پلی‌لیست "${name}" حذف بشه؟ آهنگ‌ها توی کتابخونه‌ت می‌مونن.`,
+    confirmStopSharingTitle: "توقف اشتراک‌گذاری",
+    confirmStopSharingMsg:
+      "لینک از کار می‌افته. خود پلی‌لیست دست‌نخورده می‌مونه و هر وقت بخوای دوباره می‌تونی به اشتراک بذاریش.",
+    confirmDeleteSongTitle: "حذف آهنگ",
+    confirmDeleteSongMsg: title =>
+      `"${title}" حذف بشه؟ این آهنگ از کتابخونه‌ت حذف می‌شه.`,
+    confirmRemoveFromPlaylistTitle: "حذف از پلی‌لیست",
+    confirmRemoveFromPlaylistMsg: title =>
+      `"${title}" از این پلی‌لیست حذف بشه؟ آهنگ توی کتابخونه‌ت می‌مونه.`,
+    confirmDeleteAllSongsTitle: "حذف همه‌ی آهنگ‌ها",
+    confirmDeleteAllSongsMsg:
+      "همه‌ی آهنگ‌های کتابخونه‌ت حذف بشن؟ این کار برگشت‌ناپذیره و از پلی‌لیست‌ها و علاقه‌مندی‌ها هم حذف می‌شن."
   }
 };
 
@@ -740,7 +884,7 @@ async function generateSmartMix() {
     const songs = Array.isArray(data.songs) ? data.songs : [];
 
     if (!songs.length) {
-      alert("Send a few songs to White Playlist first, then Smart Mix can build a queue for you.");
+      alert(t("smartMixNeedsSongs"));
       return;
     }
 
@@ -748,7 +892,7 @@ async function generateSmartMix() {
     openFullPlayer();
   } catch (error) {
     console.error("Smart Mix:", error);
-    alert(error.message || "Couldn't generate Smart Mix.");
+    alert(error.message || t("couldntGenerateSmartMix"));
   } finally {
     card.classList.remove("is-loading");
     playIcon.classList.remove("spinning");
@@ -818,8 +962,8 @@ function showHomeSection(sectionId, visible) {
 // Favorites and Picked For You. Reuses coverInnerHTML/escapeHTML
 // exactly as songHTML() does, just a more compact layout.
 function hcardHTML(song) {
-  const title = song.title || "Unknown";
-  const artist = song.artist || "Unknown Artist";
+  const title = song.title || t("unknown");
+  const artist = song.artist || t("unknownArtist");
 
   return `
     <button
@@ -855,8 +999,8 @@ function renderContinueListening() {
     return;
   }
 
-  const title = song.title || "Unknown";
-  const artist = song.artist || "Unknown Artist";
+  const title = song.title || t("unknown");
+  const artist = song.artist || t("unknownArtist");
 
   container.innerHTML = `
     <button
@@ -957,12 +1101,12 @@ function renderMostPlayed() {
         style="text-align:left"
       >
         <div class="song-title">
-          ${escapeHTML(song.title || "Unknown")}
+          ${escapeHTML(song.title || t("unknown"))}
         </div>
         <div class="song-meta">
-          ${escapeHTML(song.artist || "Unknown Artist")}
+          ${escapeHTML(song.artist || t("unknownArtist"))}
           •
-          ${escapeHTML(song.album || "Unknown Album")}
+          ${escapeHTML(song.album || t("unknownAlbum"))}
         </div>
       </button>
 
@@ -1293,8 +1437,8 @@ function setupSongsSelectMode() {
       const ids = [...selectedSongIds];
 
       showConfirmationModal(
-        "Delete Songs",
-        `Delete ${ids.length} song${ids.length === 1 ? "" : "s"}? This removes them from your library, playlists and favorites.`,
+        t("confirmDeleteSongsTitle"),
+        t("confirmDeleteSongsMsg")(ids.length),
         () => bulkDeleteSongs(ids)
       );
     });
@@ -1348,10 +1492,10 @@ async function bulkDeleteSongs(ids) {
 
     renderHomeDashboard();
 
-    alert(`Deleted ${ids.length} song${ids.length === 1 ? "" : "s"}.`);
+    alert(t("deletedSongsCount")(ids.length));
   } catch (error) {
     console.error("Bulk delete songs:", error);
-    alert(error.message || "Couldn't delete songs.");
+    alert(error.message || t("couldntDeleteSongs"));
   }
 }
 
@@ -1375,8 +1519,8 @@ function songHTML(song) {
       item => Number(item.id) === Number(song.id)
     );
 
-  const artist = song.artist || "Unknown Artist";
-  const album = song.album || "Unknown Album";
+  const artist = song.artist || t("unknownArtist");
+  const album = song.album || t("unknownAlbum");
   const isInPlaylistDetail = song._playlistId !== undefined;
 
   return `
@@ -1402,7 +1546,7 @@ function songHTML(song) {
         style="text-align:left"
       >
         <div class="song-title">
-          ${escapeHTML(song.title || "Unknown")}
+          ${escapeHTML(song.title || t("unknown"))}
         </div>
 
         <div class="song-meta">
@@ -1598,7 +1742,7 @@ async function toggleFavorite(song) {
     updatePlayerLike();
   } catch (error) {
     console.error("Favorite:", error);
-    alert("Couldn't update favorite.");
+    alert(t("couldntUpdateFavorite"));
   }
 }
 
@@ -1738,7 +1882,7 @@ function renderAlbums() {
           </div>
 
           <div class="library-meta">
-            ${escapeHTML(album.artist || "Unknown Artist")}
+            ${escapeHTML(album.artist || t("unknownArtist"))}
             •
             ${album.song_count || 0} songs
           </div>
@@ -1774,7 +1918,7 @@ async function openAlbum(id) {
         </h1>
 
         <div class="detail-subtitle">
-          ${escapeHTML(album.artist || "Unknown Artist")}
+          ${escapeHTML(album.artist || t("unknownArtist"))}
           •
           ${songs.length} songs
         </div>
@@ -1877,8 +2021,8 @@ function renderPlaylists() {
       if (!playlist) return;
 
       showConfirmationModal(
-        "Delete Playlist",
-        `Delete "${playlist.name || "Untitled Playlist"}"? Songs remain in your library.`,
+        t("confirmDeletePlaylistTitle"),
+        t("confirmDeletePlaylistMsg")(playlist.name || t("untitledPlaylist")),
         () => deletePlaylist(playlist)
       );
     });
@@ -1959,7 +2103,7 @@ async function openPlaylist(id) {
     renderPlaylistShareBlock(id);
   } catch (error) {
     console.error("Playlist:", error);
-    alert(error.message || "Couldn't load playlist.");
+    alert(error.message || t("couldntLoadPlaylist"));
   }
 }
 
@@ -2001,7 +2145,7 @@ function setupPlaylistDetailCoverPicker(playlistId, container) {
       await loadPlaylists();
     } catch (error) {
       console.error("Playlist cover:", error);
-      alert("Couldn't update the cover. Try a different photo.");
+      alert(t("couldntUpdateCover"));
     }
   });
 }
@@ -2088,8 +2232,8 @@ function renderShareControls(block, playlistId, status) {
     .getElementById("playlistShareStopBtn")
     .addEventListener("click", () => {
       showConfirmationModal(
-        "Stop Sharing",
-        "The link will stop working. Your playlist itself is unaffected, and you can share it again anytime.",
+        t("confirmStopSharingTitle"),
+        t("confirmStopSharingMsg"),
         () => togglePlaylistShare(playlistId, false)
       );
     });
@@ -2112,7 +2256,7 @@ async function togglePlaylistShare(playlistId, share) {
     }
   } catch (error) {
     console.error("Share playlist:", error);
-    alert(error.message || "Couldn't update sharing.");
+    alert(error.message || t("couldntUpdateSharing"));
   }
 }
 
@@ -2135,7 +2279,7 @@ function copyPlaylistShareLink(url) {
 
   navigator.clipboard
     ?.writeText(url)
-    .then(() => alert("Link copied."))
+    .then(() => alert(t("linkCopied")))
     .catch(() => alert(url));
 }
 
@@ -2192,7 +2336,7 @@ async function openSharedPlaylist(shareToken) {
     setupSharePlaylist();
   } catch (error) {
     console.error("Shared playlist:", error);
-    container.innerHTML = `<div class="empty">${escapeHTML(error.message || "This playlist link is invalid or no longer shared.")}</div>`;
+    container.innerHTML = `<div class="empty">${escapeHTML(error.message || t("playlistLinkInvalid"))}</div>`;
   }
 }
 
@@ -2200,8 +2344,8 @@ async function openSharedPlaylist(shareToken) {
 // or deleting a song you don't own doesn't apply here, and view+play
 // is all the spec calls for on a shared playlist.
 function sharedSongHTML(song) {
-  const artist = song.artist || "Unknown Artist";
-  const album = song.album || "Unknown Album";
+  const artist = song.artist || t("unknownArtist");
+  const album = song.album || t("unknownAlbum");
 
   return `
     <div class="song-item" data-song-id="${song.id}">
@@ -2221,7 +2365,7 @@ function sharedSongHTML(song) {
         style="text-align:left"
       >
         <div class="song-title">
-          ${escapeHTML(song.title || "Unknown")}
+          ${escapeHTML(song.title || t("unknown"))}
         </div>
 
         <div class="song-meta">
@@ -2268,7 +2412,7 @@ async function saveCurrentSharedPlaylist() {
     loadPlaylists();
   } catch (error) {
     console.error("Save shared playlist:", error);
-    alert(error.message || "Couldn't save this playlist.");
+    alert(error.message || t("couldntSavePlaylist"));
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -2311,7 +2455,7 @@ function showConfirmationModal(title, message, onConfirm) {
 async function deleteSong(song) {
   if (!song?.id) return;
 
-  const title = song.title || song.name || "Unknown";
+  const title = song.title || song.name || t("unknown");
 
   try {
     await api(`/songs/${song.id}`, {
@@ -2345,10 +2489,10 @@ async function deleteSong(song) {
 
     renderHomeDashboard();
 
-    alert(`Deleted "${title}".`);
+    alert(t("deletedNamed")(title));
   } catch (error) {
     console.error("Delete song:", error);
-    alert(error.message || "Couldn't delete song.");
+    alert(error.message || t("couldntDeleteSong"));
   }
 }
 
@@ -2380,10 +2524,10 @@ async function deleteAllSongs() {
 
     renderHomeDashboard();
 
-    alert("All songs deleted.");
+    alert(t("allSongsDeleted"));
   } catch (error) {
     console.error("Delete all songs:", error);
-    alert(error.message || "Couldn't delete all songs.");
+    alert(error.message || t("couldntDeleteAllSongs"));
   }
 }
 
@@ -2391,7 +2535,7 @@ function forwardSong(song) {
   if (!song?.id) return;
 
   if (!tg || typeof tg.switchInlineQuery !== "function") {
-    alert("Forwarding requires opening White Playlist from Telegram.");
+    alert(t("forwardNeedsTelegram"));
     return;
   }
 
@@ -2405,7 +2549,7 @@ function forwardSong(song) {
     (song.title || "").trim();
 
   if (!query) {
-    alert("Couldn't forward song.");
+    alert(t("couldntForwardSong"));
     return;
   }
 
@@ -2416,7 +2560,7 @@ function forwardSong(song) {
     );
   } catch (error) {
     console.error("Forward:", error);
-    alert("Couldn't open Telegram sharing.");
+    alert(t("couldntOpenTelegramSharing"));
   }
 }
 
@@ -2435,10 +2579,10 @@ async function deletePlaylist(playlist) {
 
     await loadPlaylists();
     showPage("playlistsPage");
-    alert(`Deleted "${name}". Songs remain in your library.`);
+    alert(t("deletedPlaylistNamed")(name));
   } catch (error) {
     console.error("Delete playlist:", error);
-    alert(error.message || "Couldn't delete playlist.");
+    alert(error.message || t("couldntDeletePlaylist"));
   }
 }
 
@@ -2455,10 +2599,10 @@ async function removeSongFromPlaylist(playlistId, songId) {
 
     await loadPlaylists();
     await openPlaylist(playlistId);
-    alert("Removed from playlist.");
+    alert(t("removedFromPlaylistToast"));
   } catch (error) {
     console.error("Remove from playlist:", error);
-    alert(error.message || "Couldn't remove song.");
+    alert(error.message || t("couldntRemoveSong"));
   }
 }
 
@@ -2529,8 +2673,8 @@ function setupModals() {
       if (!song) return;
 
       showConfirmationModal(
-        "Delete Song",
-        `Delete "${song.title || "Unknown"}"? This removes the song from your library.`,
+        t("confirmDeleteSongTitle"),
+        t("confirmDeleteSongMsg")(song.title || t("unknown")),
         () => deleteSong(song)
       );
     });
@@ -2565,8 +2709,8 @@ function setupModals() {
       }
 
       showConfirmationModal(
-        "Remove from Playlist",
-        `Remove "${song.title || "this song"}" from this playlist? The song stays in your library.`,
+        t("confirmRemoveFromPlaylistTitle"),
+        t("confirmRemoveFromPlaylistMsg")(song.title || t("thisSongWord")),
         () => removeSongFromPlaylist(context.playlistId, song.id)
       );
     });
@@ -2577,8 +2721,8 @@ function setupModals() {
       if (!state.songs.length) return;
 
       showConfirmationModal(
-        "Delete All Songs",
-        "Delete all songs from your library? This cannot be undone and will remove them from playlists and favorites too.",
+        t("confirmDeleteAllSongsTitle"),
+        t("confirmDeleteAllSongsMsg"),
         () => deleteAllSongs()
       );
     });
@@ -2625,7 +2769,7 @@ async function handlePlaylistCoverInputChange(event) {
     }
   } catch (error) {
     console.error("Playlist cover:", error);
-    alert("Couldn't use that image. Try a different photo.");
+    alert(t("couldntUseImage"));
   }
 }
 
@@ -2792,7 +2936,7 @@ async function openAddToPlaylist(songOrIds) {
 
         if (selectedSongIdsForPlaylist.length > 1) {
           setSongsSelectMode(false);
-          alert(`Added ${selectedSongIdsForPlaylist.length} songs to playlist.`);
+          alert(t("addedSongsToPlaylist")(selectedSongIdsForPlaylist.length));
         }
       } catch (error) {
         alert(error.message);
@@ -3141,8 +3285,8 @@ const MEDIA_SESSION_ARTWORK_SIZES = [128, 512];
 function updateMediaSessionMetadata(song) {
   if (!("mediaSession" in navigator)) return;
 
-  const title = song.title || "Unknown";
-  const artist = song.artist || "Unknown Artist";
+  const title = song.title || t("unknown");
+  const artist = song.artist || t("unknownArtist");
 
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -3419,7 +3563,7 @@ function renderQueueModal() {
 
   container.innerHTML = state.queue.map((song, index) => {
     const isCurrent = index === state.queueIndex;
-    const artist = song.artist || "Unknown Artist";
+    const artist = song.artist || t("unknownArtist");
 
     return `
       <div class="song-item${isCurrent ? " playing" : ""}" data-song-id="${song.id}">
@@ -3439,7 +3583,7 @@ function renderQueueModal() {
           data-index="${index}"
           style="text-align:left"
         >
-          <div class="song-title">${escapeHTML(song.title || "Unknown")}</div>
+          <div class="song-title">${escapeHTML(song.title || t("unknown"))}</div>
           <div class="song-meta">${escapeHTML(artist)}</div>
         </button>
 
@@ -3711,8 +3855,8 @@ function updatePlayerUI() {
 
   const song = state.currentSong;
 
-  const title = song.title || "Unknown";
-  const artist = song.artist || "Unknown Artist";
+  const title = song.title || t("unknown");
+  const artist = song.artist || t("unknownArtist");
 
   document.getElementById("miniTitle").textContent = title;
   document.getElementById("miniArtist").textContent = artist;
@@ -5983,8 +6127,8 @@ function applySongUpdate(updated) {
 }
 
 function refreshPlayerIdentityAfterEdit(song) {
-  const title = song.title || "Unknown";
-  const artist = song.artist || "Unknown Artist";
+  const title = song.title || t("unknown");
+  const artist = song.artist || t("unknownArtist");
 
   const miniTitle = document.getElementById("miniTitle");
   const miniArtist = document.getElementById("miniArtist");
@@ -6022,7 +6166,7 @@ async function saveSongEdit() {
   const artist = collapseSpaces(artistInput.value);
 
   if (!title) {
-    setEditSongStatus("The title can't be empty.", "error");
+    setEditSongStatus(t("titleCantBeEmpty"), "error");
     titleInput.focus();
     return;
   }
@@ -6033,7 +6177,7 @@ async function saveSongEdit() {
     (artist || "Unknown Artist") !== currentArtist;
 
   setEditSongBusy(true);
-  setEditSongStatus(changed ? "Saving…" : "Searching for lyrics…");
+  setEditSongStatus(changed ? t("savingEllipsis") : t("searchingLyrics"));
 
   let reload = Promise.resolve();
 
@@ -6050,7 +6194,7 @@ async function saveSongEdit() {
 
       if (stillOpen()) {
         setEditSongBusy(false);
-        setEditSongStatus(error.message || "Couldn't save changes.", "error");
+        setEditSongStatus(error.message || t("couldntSaveChanges"), "error");
       }
       return;
     }
@@ -6063,7 +6207,7 @@ async function saveSongEdit() {
     }
 
     reload = refreshLibraryAfterSongEdit();
-    if (stillOpen()) setEditSongStatus("Saved. Searching for lyrics…");
+    if (stillOpen()) setEditSongStatus(t("savedSearchingLyrics"));
   }
 
   // `song` was patched in place by applySongUpdate(), so this looks
@@ -6075,7 +6219,7 @@ async function saveSongEdit() {
 
   if (!stillOpen()) {
     // The sheet was dismissed while this ran — just report the result.
-    if (outcome === "found") showToast("Lyrics found ✓");
+    if (outcome === "found") showToast(t("lyricsFound"));
     return;
   }
 
@@ -6085,8 +6229,8 @@ async function saveSongEdit() {
     document.getElementById("editSongHint")?.classList.remove("hidden");
     setEditSongStatus(
       changed
-        ? "Saved, but no lyrics were found for this name. Adjust the title or artist and try again."
-        : "No lyrics were found for this name. Adjust the title or artist and try again.",
+        ? t("savedNoLyricsAdjust")
+        : t("noLyricsAdjust"),
       "warn"
     );
     return;
@@ -6095,14 +6239,14 @@ async function saveSongEdit() {
   closeEditSongModal();
 
   if (outcome === "found") {
-    showToast(changed ? "Saved · lyrics found ✓" : "Lyrics found ✓");
+    showToast(changed ? t("savedLyricsFound") : t("lyricsFound"));
   } else if (outcome === "instrumental") {
-    showToast("Saved · this track is instrumental");
+    showToast(t("savedInstrumental"));
   } else {
     showToast(
       changed
-        ? "Saved. Couldn't reach the lyrics service — it'll retry when you play the song."
-        : "Couldn't reach the lyrics service. Try again in a moment."
+        ? t("lyricsRetryOnPlay")
+        : t("lyricsUnavailableRetry")
     );
   }
 }
