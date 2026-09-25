@@ -649,6 +649,8 @@ async function loadUserLanguage() {
   } catch (_) {
     state.lang = "en";
   }
+
+  document.documentElement.lang = state.lang;
 }
 
 // Walks every element tagged in index.html and fills in its text /
@@ -659,12 +661,21 @@ async function loadUserLanguage() {
 function applyI18n() {
   document.querySelectorAll("[data-i18n]").forEach(el => {
     const value = t(el.getAttribute("data-i18n"));
-    if (typeof value === "string") el.textContent = value;
+    if (typeof value === "string") {
+      el.textContent = value;
+      // dir="auto" makes the element read its own text and align
+      // right for Persian / left for English, instead of always
+      // rendering left-aligned like English regardless of language.
+      el.dir = "auto";
+    }
   });
 
   document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
     const value = t(el.getAttribute("data-i18n-placeholder"));
-    if (typeof value === "string") el.placeholder = value;
+    if (typeof value === "string") {
+      el.placeholder = value;
+      el.dir = "auto";
+    }
   });
 
   document.querySelectorAll("[data-i18n-aria]").forEach(el => {
@@ -678,7 +689,10 @@ function applyI18n() {
   // that first paint isn't stuck in English while the count is 0.
   document.querySelectorAll("[data-i18n-count]").forEach(el => {
     const fn = I18N[state.lang]?.[el.getAttribute("data-i18n-count")];
-    if (typeof fn === "function") el.textContent = fn(0);
+    if (typeof fn === "function") {
+      el.textContent = fn(0);
+      el.dir = "auto";
+    }
   });
 }
 
@@ -918,6 +932,7 @@ function renderHomeGreeting() {
 
   el.textContent =
     firstName ? `${timeGreeting}, ${firstName}` : timeGreeting;
+  el.dir = "auto";
 }
 
 // Fetches the data the redesigned Home page needs beyond what
@@ -977,8 +992,8 @@ function hcardHTML(song) {
       <div class="hcard-cover">
         ${coverInnerHTML(song.cover_url, title)}
       </div>
-      <div class="hcard-title">${escapeHTML(title)}</div>
-      <div class="hcard-meta">${escapeHTML(artist)}</div>
+      <div class="hcard-title" dir="auto">${escapeHTML(title)}</div>
+      <div class="hcard-meta" dir="auto">${escapeHTML(artist)}</div>
     </button>
   `;
 }
@@ -1015,7 +1030,7 @@ function renderContinueListening() {
         ${coverInnerHTML(song.cover_url, title)}
       </div>
 
-      <div class="continue-info">
+      <div class="continue-info" dir="auto">
         <div class="continue-label">Continue Listening</div>
         <div class="continue-title">${escapeHTML(title)}</div>
         <div class="continue-artist">${escapeHTML(artist)}</div>
@@ -1100,7 +1115,7 @@ function renderMostPlayed() {
         class="song-info"
         data-action="play"
         data-id="${song.id}"
-        style="text-align:left"
+        dir="auto"
       >
         <div class="song-title">
           ${escapeHTML(song.title || t("unknown"))}
@@ -1151,7 +1166,7 @@ function renderTopArtists() {
       <div class="artist-card-cover">
         ${artistCoverInnerHTML(artist.cover_url, artist.name)}
       </div>
-      <div class="artist-card-name">${escapeHTML(artist.name)}</div>
+      <div class="artist-card-name" dir="auto">${escapeHTML(artist.name)}</div>
     </button>
   `).join("");
 
@@ -1188,7 +1203,7 @@ function renderHomePlaylists() {
       <div class="playlist-card-cover">
         ${playlist.cover_url ? coverInnerHTML(playlist.cover_url, playlist.name) : ICONS.playlist}
       </div>
-      <div class="playlist-card-title">
+      <div class="playlist-card-title" dir="auto">
         ${escapeHTML(playlist.name)}
       </div>
       <div class="playlist-card-meta">
@@ -1545,7 +1560,7 @@ function songHTML(song) {
         class="song-info"
         data-action="play"
         data-id="${song.id}"
-        style="text-align:left"
+        dir="auto"
       >
         <div class="song-title">
           ${escapeHTML(song.title || t("unknown"))}
@@ -1784,7 +1799,7 @@ function renderArtists() {
           ${artistCoverInnerHTML(artist.cover_url, artist.name)}
         </div>
 
-        <div class="library-info">
+        <div class="library-info" dir="auto">
           <div class="library-name">
             ${escapeHTML(artist.name)}
           </div>
@@ -1821,11 +1836,11 @@ async function openArtist(id) {
           ${artistCoverInnerHTML(artist.cover_url, artist.name)}
         </div>
 
-        <h1 class="detail-title">
+        <h1 class="detail-title" dir="auto">
           ${escapeHTML(artist.name)}
         </h1>
 
-        <div class="detail-subtitle">
+        <div class="detail-subtitle" dir="auto">
           ${songs.length} songs
         </div>
       </div>
@@ -1878,7 +1893,7 @@ function renderAlbums() {
           ${album.cover_url ? coverInnerHTML(album.cover_url, album.title) : ICONS.album}
         </div>
 
-        <div class="library-info">
+        <div class="library-info" dir="auto">
           <div class="library-name">
             ${escapeHTML(album.title)}
           </div>
@@ -1915,11 +1930,11 @@ async function openAlbum(id) {
 
     container.innerHTML = `
       <div class="detail-header">
-        <h1 class="detail-title">
+        <h1 class="detail-title" dir="auto">
           ${escapeHTML(album.title)}
         </h1>
 
-        <div class="detail-subtitle">
+        <div class="detail-subtitle" dir="auto">
           ${escapeHTML(album.artist || t("unknownArtist"))}
           •
           ${songs.length} songs
@@ -1976,7 +1991,7 @@ function renderPlaylists() {
             ${playlist.cover_url ? coverInnerHTML(playlist.cover_url, playlist.name) : ICONS.playlist}
           </div>
 
-          <div class="library-info">
+          <div class="library-info" dir="auto">
             <div class="library-name">
               ${escapeHTML(playlist.name)}
             </div>
@@ -2060,11 +2075,11 @@ async function openPlaylist(id) {
           ${editBadge}
         </button>
 
-        <h1 class="detail-title">
+        <h1 class="detail-title" dir="auto">
           ${escapeHTML(playlist.name || "Untitled Playlist")}
         </h1>
 
-        <div class="detail-subtitle">
+        <div class="detail-subtitle" dir="auto">
           ${songs.length} songs
         </div>
       </div>
@@ -2304,11 +2319,11 @@ async function openSharedPlaylist(shareToken) {
 
     container.innerHTML = `
       <div class="detail-header">
-        <h1 class="detail-title">
+        <h1 class="detail-title" dir="auto">
           ${escapeHTML(playlist.name || "Shared Playlist")}
         </h1>
 
-        <div class="detail-subtitle">
+        <div class="detail-subtitle" dir="auto">
           Shared by ${escapeHTML(playlist.owner_name || "a White Playlist user")}
           •
           ${songs.length} songs
@@ -2364,7 +2379,7 @@ function sharedSongHTML(song) {
         class="song-info"
         data-action="play"
         data-id="${song.id}"
-        style="text-align:left"
+        dir="auto"
       >
         <div class="song-title">
           ${escapeHTML(song.title || t("unknown"))}
@@ -2433,6 +2448,8 @@ function showConfirmationModal(title, message, onConfirm) {
 
   titleEl.textContent = title;
   messageEl.textContent = message;
+  titleEl.dir = "auto";
+  messageEl.dir = "auto";
   modal.classList.remove("hidden");
 
   const cleanup = () => {
@@ -2906,7 +2923,7 @@ async function openAddToPlaylist(songOrIds) {
           ${ICONS.plus}
         </div>
 
-        <div class="library-info">
+        <div class="library-info" dir="auto">
           <div class="library-name">
             ${escapeHTML(playlist.name)}
           </div>
@@ -3583,7 +3600,7 @@ function renderQueueModal() {
           class="song-info"
           data-queue-action="play"
           data-index="${index}"
-          style="text-align:left"
+          dir="auto"
         >
           <div class="song-title">${escapeHTML(song.title || t("unknown"))}</div>
           <div class="song-meta">${escapeHTML(artist)}</div>
@@ -5999,6 +6016,7 @@ function showToast(message) {
   }
 
   el.textContent = message;
+  el.dir = "auto";
 
   // Restart the transition if a previous toast is still visible.
   el.classList.remove("visible");
@@ -6032,6 +6050,7 @@ function setEditSongStatus(message, kind) {
   if (!el) return;
 
   el.textContent = message || "";
+  el.dir = "auto";
   el.classList.toggle("hidden", !message);
   el.classList.toggle("error", kind === "error");
   el.classList.toggle("warn", kind === "warn");
