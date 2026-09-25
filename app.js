@@ -378,6 +378,7 @@ const I18N = {
     searchEmpty: "Search for a song, artist or album.",
     songWord: "Song",
     favoriteWord: "Favorite",
+    unfavoriteWord: "Unfavorite",
     forwardWord: "Forward",
     editSongInfo: "Edit Song Info",
     removeFromPlaylist: "Remove from Playlist",
@@ -409,7 +410,7 @@ const I18N = {
     addCover: "Add cover",
     playlistNamePlaceholder: "Playlist name",
     createWord: "Create",
-    playlistNavWord: "Playlist",
+    playlistNavWord: "Playlists",
     selectedCount: n => `${n} selected`,
     goodNight: "Good night",
     goodMorning: "Good morning",
@@ -522,6 +523,7 @@ const I18N = {
     searchEmpty: "دنبال یه آهنگ، هنرمند یا آلبوم بگرد.",
     songWord: "آهنگ",
     favoriteWord: "علاقه‌مندی",
+    unfavoriteWord: "حذف علاقه‌مندی",
     forwardWord: "فوروارد",
     editSongInfo: "ویرایش اطلاعات آهنگ",
     removeFromPlaylist: "حذف از پلی‌لیست",
@@ -553,7 +555,7 @@ const I18N = {
     addCover: "افزودن کاور",
     playlistNamePlaceholder: "اسم پلی‌لیست",
     createWord: "ساخت",
-    playlistNavWord: "پلی‌لیست",
+    playlistNavWord: "پلی‌لیست‌ها",
     selectedCount: n => `${n} تا انتخاب شده`,
     goodNight: "شب بخیر",
     goodMorning: "صبح بخیر",
@@ -1645,7 +1647,7 @@ function openSongActionsMenu(song, context = {}) {
       item => Number(item.id) === Number(song.id)
     );
 
-  favoriteLabel.textContent = liked ? "Unfavorite" : "Favorite";
+  favoriteLabel.textContent = liked ? t("unfavoriteWord") : t("favoriteWord");
   favoriteBtn.classList.toggle("active", liked);
 
   // The full player already has its own dedicated like/heart button,
