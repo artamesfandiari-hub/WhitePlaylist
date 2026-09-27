@@ -111,18 +111,27 @@ svg { display: block; overflow: visible; }
 
   /* ---- Theme-toggle tokens (LIGHT/DARK) ----
      Everything below was previously hard-coded inline all over this
-     file (topbar/nav backgrounds, cover placeholders, the brand's
-     metallic text gradient, skeleton shimmer, focus rings, the
-     decorative "sheen" highlights). Pulled out here so the light
-     theme block further down has something to override. */
+     file. Pulled out here so the light theme block further down (in
+     the exact same grouping and order, for easy side-by-side diffing)
+     has something to override. Grouped by which part of the UI they
+     paint, not alphabetically — that's what you'll actually be
+     scanning for when touching a given component. */
+
+  /* Chrome: topbar + bottom nav */
   --topbar-bg: rgba(9, 9, 9, .86);
   --nav-bg: rgba(10, 10, 10, .68);
   --nav-rim: rgba(255, 255, 255, .07);
   --nav-inactive: #5d5d5d;
+
+  /* Cover-art placeholders (shown until real artwork loads) + the
+     brand wordmark's metallic text gradient */
   --cover-gradient: linear-gradient(150deg, #2a2a2a, #101010);
   --cover-gradient-playlist: linear-gradient(150deg, #262433, #101010);
   --mini-cover-bg: #101010;
   --brand-gradient: linear-gradient(135deg, #ffffff 0%, #cfcfcf 50%, #ffffff 100%);
+
+  /* Decorative: loading shimmer, ambient highlight washes, the
+     focus-visible ring, and floating-badge/modal-backdrop scrims */
   --skeleton-a: #131313;
   --skeleton-b: #1c1c1c;
   --sheen: rgba(255, 255, 255, .1);
@@ -131,9 +140,9 @@ svg { display: block; overflow: visible; }
   --modal-backdrop: rgba(0, 0, 0, .68);
 
   /* Full-screen Now Playing sheet — its own gradient (richer than a
-     flat --bg) plus a couple of bits (close/menu icon idle color,
-     the progress bar's unplayed track, the cover placeholder) that
-     look better as distinct shades rather than reusing --surface-3
+     flat --bg) plus a few bits (close/menu icon idle color, the
+     progress bar's unplayed track, the cover placeholder) that look
+     better as distinct shades rather than reusing --surface-3
      verbatim. */
   --player-bg: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 60%, #070707 100%);
   --player-cover-bg: #151515;
@@ -147,8 +156,15 @@ svg { display: block; overflow: visible; }
    button (see #themeToggle in index.html / setupTheme() in app.js)
    and remembered in localStorage. Dark stays the default identity
    of the app; this is an explicit opt-in, not an OS-driven switch,
-   so it can't unexpectedly flip on someone mid-session. */
+   so it can't unexpectedly flip on someone mid-session.
+
+   Same token groups, same order, as the dark set in TOKENS above —
+   keep it that way so the two are easy to diff at a glance. Anything
+   not re-declared here (--glass-blur, --radius-*, --ease/--dur-*,
+   --accent-glow*, --player-glow*) is intentionally identical in both
+   themes. */
 :root[data-theme="light"] {
+  /* Surfaces */
   --bg: #f7f7f8;
   --surface: #ffffff;
   --surface-2: #f0f0f1;
@@ -174,18 +190,26 @@ svg { display: block; overflow: visible; }
   --accent-contrast: #ffffff;
   --danger: #e0362c;
 
+  /* Shadows read as heavy smudges on a light surface at the dark
+     theme's opacities, so these come down substantially — soft and
+     close rather than deep and diffuse. */
   --shadow-sm: 0 4px 14px rgba(0, 0, 0, .08);
   --shadow-md: 0 12px 30px rgba(0, 0, 0, .10);
   --shadow-lg: 0 22px 54px rgba(0, 0, 0, .14);
 
+  /* Chrome: topbar + bottom nav */
   --topbar-bg: rgba(247, 247, 248, .86);
   --nav-bg: rgba(255, 255, 255, .78);
   --nav-rim: rgba(0, 0, 0, .05);
   --nav-inactive: #a7a7ab;
+
+  /* Cover-art placeholders + brand wordmark gradient */
   --cover-gradient: linear-gradient(150deg, #ececef, #d9d9dd);
   --cover-gradient-playlist: linear-gradient(150deg, #e8e3f6, #d6cfec);
   --mini-cover-bg: #ececef;
   --brand-gradient: linear-gradient(135deg, #000000 0%, #4a4a4a 50%, #000000 100%);
+
+  /* Decorative: shimmer, sheens, focus ring, badge/backdrop scrims */
   --skeleton-a: #ececec;
   --skeleton-b: #f6f6f6;
   --sheen: rgba(0, 0, 0, .04);
@@ -193,6 +217,7 @@ svg { display: block; overflow: visible; }
   --edit-badge-bg: rgba(255, 255, 255, .9);
   --modal-backdrop: rgba(20, 20, 20, .3);
 
+  /* Full-screen Now Playing sheet */
   --player-bg: linear-gradient(180deg, #ffffff 0%, #f7f7f8 55%, #efeff1 100%);
   --player-cover-bg: #ececef;
   --player-chrome-icon: #9a9a9a;

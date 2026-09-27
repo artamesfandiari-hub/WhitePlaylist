@@ -16,12 +16,15 @@
   <title>White Playlist</title>
 
   <!-- Must run before style.css paints anything: reads the saved
-       theme choice (see setupTheme() in app.js) and sets it on
-       <html> right away, so the app never flashes dark-then-light
-       (or vice versa) on load. Dark is the default identity of the
-       app, so a first-ever visitor with nothing stored yet just
-       stays dark — this only matters once someone has picked
-       light at least once. -->
+       theme choice and sets it on <html> right away, so the app
+       never flashes dark-then-light (or vice versa) on load. Dark
+       is the default identity of the app, so a first-ever visitor
+       with nothing stored yet just stays dark — this only matters
+       once someone has picked light at least once via the toggle
+       (see the THEME section at the top of app.js: THEME_KEY is
+       the localStorage key below, "wp_theme"; applyTheme()/
+       currentTheme() there are the single source of truth this
+       script is just fast-pathing for the very first frame). -->
   <script>
     (function () {
       try {

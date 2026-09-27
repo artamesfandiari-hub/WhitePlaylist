@@ -5,42 +5,93 @@ const AUDIO_API =
   "https://white-playlist-api-v2.mahantem2.workers.dev/api/v1/audio";
 
 /* =========================================================
+   THEME (LIGHT / DARK)
+   ---------------------------------------------------------
+   Lives at the very top of the file — before TELEGRAM below —
+   because that section needs applyTheme()/currentTheme() for its
+   first paint. Everywhere else in the app that reads or changes
+   the active theme (the toggle button's setupTheme(), wired up
+   down in the SETUP section) goes through these same two
+   functions, so there is exactly one place that knows how to
+   switch themes.
+
+   The app is dark by default (its original, only design); light is
+   an explicit opt-in via the topbar toggle, remembered in
+   localStorage under THEME_KEY. There is no OS "prefers-color-
+   scheme" auto-switching, so the theme never changes on someone
+   without them tapping the toggle.
+
+   CSS side: every design token this drives lives in style.css's
+   TOKENS section, keyed off <html data-theme="light">, including
+   the full-screen Now Playing player's own player-* tokens.
+   ========================================================= */
+
+const THEME_KEY = "wp_theme";
+
+// Mirrors the CSS --bg token for each theme (TOKENS section of
+// style.css), so Telegram's own header/background chrome and the
+// browser's <meta name="theme-color"> never disagree with what the
+// app itself is showing.
+const THEME_BG = { dark: "#090909", light: "#f7f7f8" };
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light"
+    ? "light"
+    : "dark";
+}
+
+// The <html data-theme> attribute is already set synchronously by
+// the inline script in index.html's <head> — before this file even
+// runs — specifically so the very first paint is never the wrong
+// theme. currentTheme() reads that same attribute back (rather than
+// localStorage again) so the two can never disagree.
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch (_) {
+    // Private browsing / storage disabled: theme still applies for
+    // this session, it just won't be remembered next launch.
+  }
+
+  // Keep Telegram's own header/background chrome, and the browser's
+  // own UI (address bar / status bar via theme-color), matching the
+  // app's surface instead of staying stuck on one color.
+  const bg = THEME_BG[theme] || THEME_BG.dark;
+
+  if (tg) {
+    try {
+      tg.setHeaderColor(bg);
+      tg.setBackgroundColor(bg);
+    } catch (_) {}
+  }
+
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", bg);
+}
+
+/* =========================================================
    TELEGRAM
    ========================================================= */
 
 const tg =
   window.Telegram?.WebApp || null;
 
-// Bg colors for Telegram's own header/chrome + the browser's
-// <meta name="theme-color">, kept in sync with the CSS --bg token
-// for each theme (see the TOKENS section of style.css). Pulled out
-// as a constant so setupTheme() below and this initial paint use
-// the exact same values instead of two copies drifting apart.
-const THEME_BG = { dark: "#090909", light: "#f7f7f8" };
-
-// The <html data-theme> attribute is already set synchronously by
-// the inline script in index.html's <head>, before this file even
-// loads — reading it back here (rather than localStorage again)
-// guarantees this always agrees with what's actually on screen.
-const initialTheme =
-  document.documentElement.getAttribute("data-theme") === "light"
-    ? "light"
-    : "dark";
-
 if (tg) {
   tg.ready();
   tg.expand();
-
-  try {
-    tg.setHeaderColor(THEME_BG[initialTheme]);
-    tg.setBackgroundColor(THEME_BG[initialTheme]);
-  } catch (_) {}
 }
 
-if (initialTheme === "light") {
-  const initialMeta = document.querySelector('meta[name="theme-color"]');
-  if (initialMeta) initialMeta.setAttribute("content", THEME_BG.light);
-}
+// Syncs Telegram's chrome + the theme-color meta tag with whatever
+// theme is already on <html> (set by the inline head script above).
+// On a first-ever launch, with nothing stored yet, currentTheme()
+// simply falls back to "dark" — the app's default.
+applyTheme(currentTheme());
 
 // Keeps --app-vh in sync with the real visible height this page has to
 // work with. Inside Telegram, that's tg.viewportStableHeight — the
@@ -706,19 +757,12 @@ function applyI18n() {
 }
 
 /* =========================================================
-   THEME (LIGHT / DARK)
-   The app is dark by default (its original, only design); this
-   adds an explicit opt-in light theme via the topbar toggle. The
-   choice is remembered in localStorage and applied instantly (no
-   OS/system-preference auto-switching, so it never changes under
-   someone without them tapping it). The <html data-theme="light">
-   attribute is what every CSS token in style.css keys off of — see
-   the TOKENS section there. The full-screen Now Playing player is
-   intentionally excluded: it stays a dark, artwork-tinted surface
-   in both themes, same as most music apps' now-playing screens.
+   THEME TOGGLE (wiring only)
+   THEME_KEY / THEME_BG / currentTheme() / applyTheme() all live in
+   the THEME section at the very top of this file — see there for
+   how switching a theme actually works. This just connects the
+   topbar button to that.
    ========================================================= */
-
-const THEME_KEY = "wp_theme";
 
 function setupTheme() {
   const button = document.getElementById("themeToggle");
@@ -727,39 +771,6 @@ function setupTheme() {
   button.addEventListener("click", () => {
     applyTheme(currentTheme() === "light" ? "dark" : "light");
   });
-}
-
-function currentTheme() {
-  return document.documentElement.getAttribute("data-theme") === "light"
-    ? "light"
-    : "dark";
-}
-
-function applyTheme(theme) {
-  if (theme === "light") {
-    document.documentElement.setAttribute("data-theme", "light");
-  } else {
-    document.documentElement.removeAttribute("data-theme");
-  }
-
-  try {
-    localStorage.setItem(THEME_KEY, theme);
-  } catch (_) {}
-
-  // Keep Telegram's own header/background chrome, and the
-  // browser's own UI (address bar / status bar via theme-color),
-  // matching the app's surface instead of staying stuck on dark.
-  const bg = THEME_BG[theme] || THEME_BG.dark;
-
-  if (tg) {
-    try {
-      tg.setHeaderColor(bg);
-      tg.setBackgroundColor(bg);
-    } catch (_) {}
-  }
-
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", bg);
 }
 
 /* =========================================================
