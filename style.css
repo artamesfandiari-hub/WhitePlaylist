@@ -135,6 +135,7 @@ svg { display: block; overflow: visible; }
   --skeleton-a: #131313;
   --skeleton-b: #1c1c1c;
   --sheen: rgba(255, 255, 255, .1);
+  --scribble-ink: rgba(196, 208, 255, .2);
   --focus-ring: rgba(255, 255, 255, .55);
   --edit-badge-bg: rgba(10, 10, 10, .85);
   --modal-backdrop: rgba(0, 0, 0, .68);
@@ -213,6 +214,7 @@ svg { display: block; overflow: visible; }
   --skeleton-a: #ececec;
   --skeleton-b: #f6f6f6;
   --sheen: rgba(0, 0, 0, .04);
+  --scribble-ink: rgba(38, 52, 130, .26);
   --focus-ring: rgba(0, 0, 0, .4);
   --edit-badge-bg: rgba(255, 255, 255, .9);
   --modal-backdrop: rgba(20, 20, 20, .3);
@@ -235,6 +237,7 @@ html, body {
 
 #app {
   position: relative;
+  z-index: 1;
   width: 100%;
   min-height: 100vh;
   padding-bottom: 90px;
@@ -1980,33 +1983,48 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 @keyframes homeSkeletonShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
-/* AMBIENT BACKGROUND — single low-key animated gradient, subtle and
-   fixed behind the whole app (drifts slowly, no color-drop effect,
-   no per-cover tinting). */
-#app::before {
-  content: "";
+/* SCRIBBLE BACKGROUND — sharp ballpoint-pen doodles that draw
+   themselves, hold for a moment, then get "erased" from the start,
+   on a staggered loop so something is always being drawn. It's one
+   fixed inline <svg class="scribble-bg"> at the top of <body> (see
+   index.html) sitting behind #app, so cards/glass sit on top of it
+   and the lines only show in the gaps. Each path uses pathLength="1"
+   so one dasharray/dashoffset keyframe set works for every path,
+   whatever its real length; per-path timing comes from the --dur /
+   --delay custom properties set inline in the markup. Ink color is
+   the --scribble-ink token (see TOKENS). */
+.scribble-bg {
   position: fixed;
-  inset: -25%;
-  z-index: 120;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 20% 20%, var(--sheen), transparent 40%),
-    radial-gradient(circle at 80% 65%, var(--accent-glow-soft), transparent 38%);
-  transform: translate3d(0,0,0) scale(1);
-  animation: whitePlaylistAmbient 18s ease-in-out infinite alternate;
-  will-change: transform;
 }
 
-@keyframes whitePlaylistAmbient {
-  0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
-  50%  { transform: translate3d(2%, 1.5%, 0) scale(1.035); }
-  100% { transform: translate3d(-1%, 2%, 0) scale(1.02); }
+.scribble-bg path {
+  fill: none;
+  stroke: var(--scribble-ink);
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: scribbleDraw var(--dur, 12s) ease-in-out var(--delay, 0s) infinite;
+}
+
+/* 0-38% pen draws the stroke, 38-72% it rests, 72-100% it wipes away
+   from where it started (offset runs on past 0 to -1). */
+@keyframes scribbleDraw {
+  0%   { stroke-dashoffset: 1; }
+  38%  { stroke-dashoffset: 0; }
+  72%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -1; }
 }
 
 /* RESPONSIVE */
 @media (min-width: 700px) {
   body { max-width: 620px; margin: auto; background: var(--bg); }
-  #app { background: var(--bg); }
   .bottom-nav { left: 50%; right: auto; width: 620px; transform: translateX(-50%); }
   .mini-player { left: 50%; right: auto; width: 600px; transform: translateX(-50%); }
 }
@@ -2021,6 +2039,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   #app::before, #app::after, .mini-player::before,
   .skeleton-block, .cover-art, .page.active,
   body.is-playing .player-cover { animation: none !important; }
+  .scribble-bg path { animation: none !important; stroke-dashoffset: 0; }
 }
 
 button:focus-visible,
