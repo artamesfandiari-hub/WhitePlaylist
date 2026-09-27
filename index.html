@@ -15,6 +15,23 @@
 
   <title>White Playlist</title>
 
+  <!-- Must run before style.css paints anything: reads the saved
+       theme choice (see setupTheme() in app.js) and sets it on
+       <html> right away, so the app never flashes dark-then-light
+       (or vice versa) on load. Dark is the default identity of the
+       app, so a first-ever visitor with nothing stored yet just
+       stays dark — this only matters once someone has picked
+       light at least once. -->
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("wp_theme") === "light") {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      } catch (_) {}
+    })();
+  </script>
+
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <!-- Display fonts used only for the full-player lyrics ticker
@@ -28,7 +45,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260921-2">
+  <link rel="stylesheet" href="style.css?v=20260927-1">
 </head>
 
 <body>
@@ -43,17 +60,43 @@
         <div class="subtitle" data-i18n="subtitle">Your music library</div>
       </div>
 
-      <button
-        class="icon-button"
-        id="searchButton"
-        aria-label="Search"
-        data-i18n-aria="ariaSearch"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="6.5"></circle>
-          <line x1="16" y1="16" x2="21" y2="21"></line>
-        </svg>
-      </button>
+      <div class="topbar-actions">
+
+        <button
+          class="icon-button"
+          id="themeToggle"
+          aria-label="Toggle light/dark theme"
+          data-i18n-aria="ariaTheme"
+        >
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.5"></circle>
+            <line x1="12" y1="2.5" x2="12" y2="5"></line>
+            <line x1="12" y1="19" x2="12" y2="21.5"></line>
+            <line x1="2.5" y1="12" x2="5" y2="12"></line>
+            <line x1="19" y1="12" x2="21.5" y2="12"></line>
+            <line x1="5.1" y1="5.1" x2="6.8" y2="6.8"></line>
+            <line x1="17.2" y1="17.2" x2="18.9" y2="18.9"></line>
+            <line x1="5.1" y1="18.9" x2="6.8" y2="17.2"></line>
+            <line x1="17.2" y1="6.8" x2="18.9" y2="5.1"></line>
+          </svg>
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 6.8 6.8 0 0 0 20 14.5Z"></path>
+          </svg>
+        </button>
+
+        <button
+          class="icon-button"
+          id="searchButton"
+          aria-label="Search"
+          data-i18n-aria="ariaSearch"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5"></circle>
+            <line x1="16" y1="16" x2="21" y2="21"></line>
+          </svg>
+        </button>
+
+      </div>
 
     </header>
 

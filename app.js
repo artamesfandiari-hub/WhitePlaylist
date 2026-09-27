@@ -11,14 +11,35 @@ const AUDIO_API =
 const tg =
   window.Telegram?.WebApp || null;
 
+// Bg colors for Telegram's own header/chrome + the browser's
+// <meta name="theme-color">, kept in sync with the CSS --bg token
+// for each theme (see the TOKENS section of style.css). Pulled out
+// as a constant so setupTheme() below and this initial paint use
+// the exact same values instead of two copies drifting apart.
+const THEME_BG = { dark: "#090909", light: "#f7f7f8" };
+
+// The <html data-theme> attribute is already set synchronously by
+// the inline script in index.html's <head>, before this file even
+// loads — reading it back here (rather than localStorage again)
+// guarantees this always agrees with what's actually on screen.
+const initialTheme =
+  document.documentElement.getAttribute("data-theme") === "light"
+    ? "light"
+    : "dark";
+
 if (tg) {
   tg.ready();
   tg.expand();
 
   try {
-    tg.setHeaderColor("#090909");
-    tg.setBackgroundColor("#090909");
+    tg.setHeaderColor(THEME_BG[initialTheme]);
+    tg.setBackgroundColor(THEME_BG[initialTheme]);
   } catch (_) {}
+}
+
+if (initialTheme === "light") {
+  const initialMeta = document.querySelector('meta[name="theme-color"]');
+  if (initialMeta) initialMeta.setAttribute("content", THEME_BG.light);
 }
 
 // Keeps --app-vh in sync with the real visible height this page has to
@@ -343,6 +364,7 @@ const I18N = {
   en: {
     subtitle: "Your music library",
     ariaSearch: "Search",
+    ariaTheme: "Switch between light and dark theme",
     searchPlaceholder: "Search songs, artists or albums...",
     homeSubtitle: "Here is your music.",
     smartMixLabel: "✨ Smart Mix",
@@ -488,6 +510,7 @@ const I18N = {
   fa: {
     subtitle: "کتابخونه‌ی موزیک تو",
     ariaSearch: "جستجو",
+    ariaTheme: "تغییر بین تم روشن و تیره",
     searchPlaceholder: "جستجوی آهنگ، هنرمند یا آلبوم...",
     homeSubtitle: "بیا موزیکاتو ببین.",
     smartMixLabel: "✨ میکس هوشمند",
@@ -683,6 +706,63 @@ function applyI18n() {
 }
 
 /* =========================================================
+   THEME (LIGHT / DARK)
+   The app is dark by default (its original, only design); this
+   adds an explicit opt-in light theme via the topbar toggle. The
+   choice is remembered in localStorage and applied instantly (no
+   OS/system-preference auto-switching, so it never changes under
+   someone without them tapping it). The <html data-theme="light">
+   attribute is what every CSS token in style.css keys off of — see
+   the TOKENS section there. The full-screen Now Playing player is
+   intentionally excluded: it stays a dark, artwork-tinted surface
+   in both themes, same as most music apps' now-playing screens.
+   ========================================================= */
+
+const THEME_KEY = "wp_theme";
+
+function setupTheme() {
+  const button = document.getElementById("themeToggle");
+  if (!button) return;
+
+  button.addEventListener("click", () => {
+    applyTheme(currentTheme() === "light" ? "dark" : "light");
+  });
+}
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light"
+    ? "light"
+    : "dark";
+}
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch (_) {}
+
+  // Keep Telegram's own header/background chrome, and the
+  // browser's own UI (address bar / status bar via theme-color),
+  // matching the app's surface instead of staying stuck on dark.
+  const bg = THEME_BG[theme] || THEME_BG.dark;
+
+  if (tg) {
+    try {
+      tg.setHeaderColor(bg);
+      tg.setBackgroundColor(bg);
+    } catch (_) {}
+  }
+
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", bg);
+}
+
+/* =========================================================
    INIT
    ========================================================= */
 
@@ -695,6 +775,7 @@ async function init() {
   await loadUserLanguage();
   applyI18n();
 
+  setupTheme();
   setupNavigation();
   setupSearch();
   setupPlayer();
