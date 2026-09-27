@@ -130,14 +130,16 @@ svg { display: block; overflow: visible; }
   --edit-badge-bg: rgba(10, 10, 10, .85);
   --modal-backdrop: rgba(0, 0, 0, .68);
 
-  /* The full-screen Now Playing sheet stays a deliberately dark,
-     immersive surface tinted by the song's own artwork glow in
-     BOTH themes (same idea as Spotify/Apple Music's player) — so
-     its text tokens are intentionally NOT re-declared in the light
-     theme block below. */
-  --player-text: #f6f6f6;
-  --player-text-secondary: #9a9a9a;
-  --player-text-muted: #6c6c6c;
+  /* Full-screen Now Playing sheet — its own gradient (richer than a
+     flat --bg) plus a couple of bits (close/menu icon idle color,
+     the progress bar's unplayed track, the cover placeholder) that
+     look better as distinct shades rather than reusing --surface-3
+     verbatim. */
+  --player-bg: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 60%, #070707 100%);
+  --player-cover-bg: #151515;
+  --player-chrome-icon: #888;
+  --player-track-empty: #2b2b2b;
+  --main-play-glow: rgba(255, 255, 255, .18);
 }
 
 /* ---------- LIGHT THEME ----------
@@ -190,6 +192,12 @@ svg { display: block; overflow: visible; }
   --focus-ring: rgba(0, 0, 0, .4);
   --edit-badge-bg: rgba(255, 255, 255, .9);
   --modal-backdrop: rgba(20, 20, 20, .3);
+
+  --player-bg: linear-gradient(180deg, #ffffff 0%, #f7f7f8 55%, #efeff1 100%);
+  --player-cover-bg: #ececef;
+  --player-chrome-icon: #9a9a9a;
+  --player-track-empty: #dcdce0;
+  --main-play-glow: rgba(0, 0, 0, .16);
 }
 
 /* ---------- 3. BASE / LAYOUT ---------- */
@@ -1174,7 +1182,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
   display: flex;
   align-items: stretch;
   justify-content: center;
-  background: rgba(0, 0, 0, .8);
+  background: var(--modal-backdrop);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   animation: overlayIn var(--dur-slow) var(--ease);
@@ -1206,13 +1214,8 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
      of drifting with however much total content there is. */
   justify-content: flex-start;
   border-radius: 28px 28px 0 0;
-  background: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 60%, #070707 100%);
-  /* Deliberately NOT var(--text): this sheet stays a dark, immersive
-     surface (tinted by the song's own artwork glow) in both themes,
-     same idea as Spotify/Apple Music's Now Playing screen, so its
-     text needs its own theme-independent color — see --player-text*
-     tokens near the top of this file. */
-  color: var(--player-text);
+  background: var(--player-bg);
+  color: var(--text);
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -1247,11 +1250,11 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-close {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
-  color: #888;
+  color: var(--player-chrome-icon);
   transform: translateX(-8px);
   transition: none;
 }
-.player-close:active { transform: translateX(-8px); color: #fff; }
+.player-close:active { transform: translateX(-8px); color: var(--text); }
 .player-close svg { width: 21px; height: 21px; }
 
 .player-top-actions {
@@ -1264,11 +1267,11 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
 .player-menu-btn {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
-  color: #888;
+  color: var(--player-chrome-icon);
   transition: none;
 }
 .player-menu-btn svg { width: 20px; height: 20px; }
-.player-menu-btn:active { color: #fff; }
+.player-menu-btn:active { color: var(--text); }
 
 .player-cover {
   width: min(90vw, 340px, calc(var(--app-vh, 100dvh) * 0.28));
@@ -1287,7 +1290,7 @@ body.is-playing .mini-player { box-shadow: var(--shadow-md), 0 0 0 1px var(--pla
      for the controls row at the bottom on every screen size. */
   margin: clamp(40px, calc(var(--app-vh, 100dvh) * 0.07), 54px) auto clamp(10px, calc(var(--app-vh, 100dvh) * 0.02), 20px);
   border-radius: 18px;
-  background: #151515;
+  background: var(--player-cover-bg);
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -1343,7 +1346,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   margin-top: 8px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   text-align: center;
-  color: var(--player-text-muted);
+  color: var(--text-muted);
   font-size: 14px; line-height: 20px;
 }
 
@@ -1390,7 +1393,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   font-size: 26px;
   font-weight: 800;
   line-height: 1.3;
-  color: #fff;
+  color: var(--text);
   text-align: center;
   /* Medium-weight display font for Latin lyrics — bolder/more
      deliberate than the app's plain system font, without being an
@@ -1458,7 +1461,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-lyrics-status {
   width: 100%;
   text-align: center;
-  color: var(--player-text-muted);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
 }
@@ -1515,7 +1518,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
    (loading/unavailable), via the [data-state] flag app.js sets. */
 .waveform-canvas[data-state="ready"] ~ #progress::-webkit-slider-runnable-track { background: transparent; }
 .waveform-canvas:not([data-state="ready"]) ~ #progress::-webkit-slider-runnable-track {
-  background: linear-gradient(to right, #fff var(--fill), #2b2b2b var(--fill));
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--player-track-empty) var(--fill));
 }
 
 #progress::-webkit-slider-runnable-track {
@@ -1533,8 +1536,8 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   box-shadow: none;
 }
 
-#progress::-moz-range-track { height: 6px; background: #2b2b2b; border-radius: 20px; }
-#progress::-moz-range-progress { height: 6px; background: #fff; border-radius: 20px; }
+#progress::-moz-range-track { height: 6px; background: var(--player-track-empty); border-radius: 20px; }
+#progress::-moz-range-progress { height: 6px; background: var(--accent); border-radius: 20px; }
 #progress::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: transparent; }
 
 .time-row {
@@ -1543,7 +1546,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   display: flex;
   justify-content: space-between;
   margin-top: 7px;
-  color: var(--player-text-muted);
+  color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -1565,7 +1568,7 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   display: flex !important;
   align-items: center; justify-content: center;
   flex-shrink: 0;
-  color: #fff;
+  color: var(--text);
   opacity: 1 !important;
   visibility: visible !important;
   transition: none !important;
@@ -1591,23 +1594,19 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 .player-controls .main-play {
   width: 68px; height: 68px;
   border-radius: 50%;
-  background: #fff;
-  color: #000;
-  box-shadow: 0 10px 26px rgba(255, 255, 255, .18);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: 0 10px 26px var(--main-play-glow);
 }
 .player-controls .main-play:active { opacity: .85 !important; }
-.player-controls .main-play svg { width: 32px !important; height: 32px !important; fill: #000; stroke: none; }
+.player-controls .main-play svg { width: 32px !important; height: 32px !important; fill: currentColor; stroke: none; }
 
-#shuffleButton, #previousButton, #nextButton, #playerLike { color: #fff; }
+#shuffleButton, #previousButton, #nextButton, #playerLike { color: var(--text); }
 
-#shuffleButton { color: #777 !important; }
-#shuffleButton.active { color: #fff !important; }
+#shuffleButton { color: var(--text-muted) !important; }
+#shuffleButton.active { color: var(--accent) !important; }
 
-/* #playerLike lives in the always-dark full player, so it keeps a
-   constant white; .mini-like lives on the regular (theme-adaptive)
-   mini-player, so it follows --accent instead. */
-#playerLike.active { color: #fff !important; }
-.mini-like.active { color: var(--accent) !important; }
+#playerLike.active, .mini-like.active { color: var(--accent) !important; }
 #playerLike.active svg, .mini-like.active svg { fill: currentColor !important; stroke: currentColor !important; }
 
 /* Shared icon stroke rules */
