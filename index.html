@@ -48,7 +48,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260928-1">
+  <link rel="stylesheet" href="style.css?v=20260928-2">
 </head>
 
 <body>
@@ -141,6 +141,24 @@
 
         <!-- PERSONALIZED HEADER -->
         <div class="home-header" id="homeHeader">
+        <!-- Thinker: a little stick figure whose brain is being scribbled
+             on, forever. Decorative only. Styles: .thinker in style.css -->
+        <svg class="thinker" viewBox="0 0 120 140" aria-hidden="true" focusable="false">
+          <g class="thinker-body">
+            <line x1="60" y1="80" x2="60" y2="114"/>
+            <path d="M60 90 L38 106 M60 90 L82 104"/>
+            <path d="M60 114 L44 138 M60 114 L76 138"/>
+          </g>
+          <g class="thinker-head">
+            <circle cx="60" cy="46" r="34"/>
+            <path class="thinker-brain" pathLength="1" style="--delay:0s"
+                  d="M42 52 C 40 30, 70 28, 76 42 C 82 56, 50 66, 46 48 C 44 34, 78 34, 74 52 C 72 62, 48 60, 52 42 C 55 30, 72 40, 66 50 C 62 56, 54 50, 60 44"/>
+            <path class="thinker-brain" pathLength="1" style="--delay:1.6s"
+                  d="M38 40 L80 33 L40 48 L82 43 L42 57 L78 53 L46 63"/>
+          </g>
+          <path class="thinker-spark" d="M100 14 L104 22 M108 10 L108 19 M114 15 L108 22"/>
+        </svg>
+
           <div class="home-greeting" id="homeGreeting">Welcome back</div>
           <div class="home-greeting-subtitle" data-i18n="homeSubtitle">Here is your music.</div>
         </div>

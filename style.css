@@ -867,7 +867,13 @@ main { width: 100%; }
 }
 
 /* HOME DASHBOARD */
-.home-header { margin-bottom: 26px; }
+.home-header {
+  position: relative;
+  margin-bottom: 26px;
+  /* room for the .thinker figure on the trailing side */
+  padding-inline-end: 104px;
+  min-height: 96px;
+}
 
 .home-greeting {
   font-size: 26px;
@@ -2022,6 +2028,62 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   100% { stroke-dashoffset: -1; }
 }
 
+/* THINKER — stick figure with a brain that is constantly being
+   scribbled on. Outline uses --text-secondary, the brain scribbles
+   use --accent so they are the sharpest thing in the drawing. The
+   scribbles reuse the same draw / hold / wipe keyframes as the
+   background doodles (scribbleDraw); the head also gives a tiny
+   "thinking hard" wobble, and a few sparks flicker beside it. */
+.thinker {
+  position: absolute;
+  top: -4px;
+  inset-inline-end: 0;
+  width: 92px;
+  height: 108px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.thinker line, .thinker path, .thinker circle {
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.thinker .thinker-brain {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: scribbleDraw 4.2s ease-in-out var(--delay, 0s) infinite;
+}
+
+.thinker-head {
+  transform-origin: 60px 80px;
+  animation: thinkerWobble 3.4s ease-in-out infinite;
+}
+
+.thinker .thinker-spark {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  animation: thinkerSpark 2.1s steps(1, end) infinite;
+}
+
+@keyframes thinkerWobble {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50%      { transform: rotate(2.5deg); }
+}
+
+@keyframes thinkerSpark {
+  0%   { opacity: 0; }
+  30%  { opacity: 1; }
+  60%  { opacity: 0; }
+  75%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* RESPONSIVE */
 @media (min-width: 700px) {
   body { max-width: 620px; margin: auto; background: var(--bg); }
@@ -2040,6 +2102,9 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   .skeleton-block, .cover-art, .page.active,
   body.is-playing .player-cover { animation: none !important; }
   .scribble-bg path { animation: none !important; stroke-dashoffset: 0; }
+  .thinker .thinker-brain { animation: none !important; stroke-dashoffset: 0; }
+  .thinker-head, .thinker .thinker-spark { animation: none !important; }
+  .thinker .thinker-spark { opacity: 1; }
 }
 
 button:focus-visible,
