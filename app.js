@@ -764,6 +764,124 @@ function applyI18n() {
    topbar button to that.
    ========================================================= */
 
+/* =========================================================
+   LIVING BACKGROUND (behaviour)
+   ----------------------------------------------------------------
+   All visuals live in style.css ("LIVING BACKGROUND"). This only
+   adds three cheap things on top:
+     1. pauses every background animation while the app is hidden
+     2. gentle scroll parallax (rAF-throttled, transform only)
+     3. a soft spotlight that eases toward the finger / mouse
+   Low-end phones get data-fx="lite" (fewer layers, no spotlight);
+   prefers-reduced-motion users get a static background.
+   ========================================================= */
+function setupAmbientBackground() {
+  const root = document.documentElement;
+  const bg = document.getElementById("ambientBg");
+
+  if (!bg) return;
+
+  document.body.dataset.page = "homePage";
+
+  const lowEnd =
+    (typeof navigator.deviceMemory === "number" && navigator.deviceMemory <= 2) ||
+    (typeof navigator.hardwareConcurrency === "number" && navigator.hardwareConcurrency <= 2);
+
+  if (lowEnd) root.setAttribute("data-fx", "lite");
+
+  document.addEventListener("visibilitychange", () => {
+    root.classList.toggle("ambient-paused", document.hidden);
+  });
+
+  const reduceMotion =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (reduceMotion) return;
+
+  // --- scroll parallax: the lights move a little slower than the content
+  const orbs = document.getElementById("ambientOrbs");
+  let parallaxQueued = false;
+
+  window.addEventListener("scroll", () => {
+    if (parallaxQueued || !orbs) return;
+    parallaxQueued = true;
+
+    requestAnimationFrame(() => {
+      parallaxQueued = false;
+      const y = Math.min(window.scrollY || 0, 2400);
+      orbs.style.transform = "translate3d(0," + (-y * 0.035).toFixed(1) + "px,0)";
+    });
+  }, { passive: true });
+
+  if (lowEnd) return;
+
+  // --- spotlight that follows touch / mouse with easing
+  const glow = document.getElementById("ambientTouch");
+
+  if (!glow) return;
+
+  let targetX = 0, targetY = 0, curX = 0, curY = 0;
+  let running = false;
+  let active = false;
+
+  const tick = () => {
+    curX += (targetX - curX) * 0.14;
+    curY += (targetY - curY) * 0.14;
+    glow.style.transform = "translate3d(" + curX.toFixed(1) + "px," + curY.toFixed(1) + "px,0)";
+
+    const settled = Math.abs(targetX - curX) < 0.5 && Math.abs(targetY - curY) < 0.5;
+
+    if (settled && !active) {
+      running = false;
+      return;
+    }
+
+    requestAnimationFrame(tick);
+  };
+
+  const start = (x, y, jump) => {
+    targetX = x;
+    targetY = y;
+
+    if (jump) {
+      curX = x;
+      curY = y;
+    }
+
+    active = true;
+    glow.classList.add("on");
+
+    if (!running) {
+      running = true;
+      requestAnimationFrame(tick);
+    }
+  };
+
+  const stop = () => {
+    active = false;
+    glow.classList.remove("on");
+  };
+
+  window.addEventListener("touchstart", event => {
+    const t = event.touches[0];
+    if (t) start(t.clientX, t.clientY, true);
+  }, { passive: true });
+
+  window.addEventListener("touchmove", event => {
+    const t = event.touches[0];
+    if (t) start(t.clientX, t.clientY, false);
+  }, { passive: true });
+
+  window.addEventListener("touchend", stop, { passive: true });
+  window.addEventListener("touchcancel", stop, { passive: true });
+
+  window.addEventListener("pointermove", event => {
+    if (event.pointerType === "mouse") start(event.clientX, event.clientY, false);
+  }, { passive: true });
+
+  document.addEventListener("mouseleave", stop);
+}
+
 function setupTheme() {
   const button = document.getElementById("themeToggle");
   if (!button) return;
@@ -787,6 +905,7 @@ async function init() {
   applyI18n();
 
   setupTheme();
+  setupAmbientBackground();
   setupNavigation();
   setupSearch();
   setupPlayer();
@@ -913,6 +1032,10 @@ function showPage(pageId) {
   if (page) {
     page.classList.add("active");
   }
+
+  // Lets the living background slide its lights to a new spot
+  // (see body[data-page] in style.css).
+  document.body.dataset.page = pageId;
 
   document.querySelectorAll(".nav-item").forEach(item => {
     item.classList.toggle(

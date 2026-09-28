@@ -14,7 +14,6 @@
   >
 
   <title>White Playlist</title>
-  <meta name="app-version" content="4.3">
 
   <!-- Must run before style.css paints anything: reads the saved
        theme choice and sets it on <html> right away, so the app
@@ -49,23 +48,27 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260928-2">
+  <link rel="stylesheet" href="style.css?v=20260928-1">
 </head>
 
 <body>
 
-  <!-- Decorative pen-scribble background (see SCRIBBLE BACKGROUND in
-       style.css). Purely visual, so hidden from assistive tech. -->
-  <svg class="scribble-bg" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
-    <path pathLength="1" style="--dur:13s;--delay:0s" d="M-10 90 C 40 40, 110 30, 130 80 S 60 150, 40 100 S 120 20, 220 60 S 330 120, 420 60"/>
-    <path pathLength="1" style="--dur:9s;--delay:2.5s" d="M20 220 L120 190 L40 240 L150 205 L60 260 L180 225 L80 280 L210 240"/>
-    <path pathLength="1" style="--dur:11s;--delay:5s" d="M300 330 C 340 300, 380 340, 350 380 C 320 420, 270 380, 290 340 C 310 305, 350 330, 340 360 C 330 385, 305 370, 312 352"/>
-    <path pathLength="1" style="--dur:12s;--delay:1s" d="M90 380 C 40 350, 20 420, 70 445 C 130 470, 170 400, 120 365 C 80 340, 40 390, 75 420 C 100 440, 135 410, 115 390"/>
-    <path pathLength="1" style="--dur:10s;--delay:7s" d="M-10 500 Q 30 470 60 500 T 120 500 T 180 500 T 240 500 T 300 500 T 360 500 T 420 500"/>
-    <path pathLength="1" style="--dur:14s;--delay:3.5s" d="M420 560 C 330 540, 300 620, 360 630 C 420 640, 380 560, 310 600 C 240 640, 300 730, 400 700"/>
-    <path pathLength="1" style="--dur:8s;--delay:6s" d="M30 620 L110 580 M40 650 L130 605 M55 680 L150 630 M75 705 L165 660"/>
-    <path pathLength="1" style="--dur:9s;--delay:9s" d="M200 745 L260 795 M260 745 L200 795 M230 738 L230 800 M190 770 L270 770"/>
-  </svg>
+  <!-- LIVING BACKGROUND — purely decorative, sits behind #app.
+       Styles: "LIVING BACKGROUND" section in style.css.
+       Behaviour (pause when hidden, scroll parallax, touch glow):
+       setupAmbientBackground() in app.js. -->
+  <div class="ambient-bg" id="ambientBg" aria-hidden="true">
+    <div class="ambient-orbs" id="ambientOrbs">
+      <div class="ambient-orb ambient-orb--a"></div>
+      <div class="ambient-orb ambient-orb--b"></div>
+      <div class="ambient-orb ambient-orb--c"></div>
+    </div>
+    <div class="ambient-sweep"></div>
+    <div class="ambient-rise"><div class="ambient-rise-core"></div></div>
+    <div class="ambient-touch" id="ambientTouch"></div>
+    <div class="ambient-grain"></div>
+    <div class="ambient-vignette"></div>
+  </div>
 
   <div id="app">
 
@@ -142,24 +145,6 @@
 
         <!-- PERSONALIZED HEADER -->
         <div class="home-header" id="homeHeader">
-        <!-- Thinker: a little stick figure whose brain is being scribbled
-             on, forever. Decorative only. Styles: .thinker in style.css -->
-        <svg class="thinker" viewBox="0 0 120 140" aria-hidden="true" focusable="false">
-          <g class="thinker-body">
-            <line x1="60" y1="80" x2="60" y2="114"/>
-            <path d="M60 90 L38 106 M60 90 L82 104"/>
-            <path d="M60 114 L44 138 M60 114 L76 138"/>
-          </g>
-          <g class="thinker-head">
-            <circle cx="60" cy="46" r="34"/>
-            <path class="thinker-brain" pathLength="1" style="--delay:0s"
-                  d="M42 52 C 40 30, 70 28, 76 42 C 82 56, 50 66, 46 48 C 44 34, 78 34, 74 52 C 72 62, 48 60, 52 42 C 55 30, 72 40, 66 50 C 62 56, 54 50, 60 44"/>
-            <path class="thinker-brain" pathLength="1" style="--delay:1.6s"
-                  d="M38 40 L80 33 L40 48 L82 43 L42 57 L78 53 L46 63"/>
-          </g>
-          <path class="thinker-spark" d="M100 14 L104 22 M108 10 L108 19 M114 15 L108 22"/>
-        </svg>
-
           <div class="home-greeting" id="homeGreeting">Welcome back</div>
           <div class="home-greeting-subtitle" data-i18n="homeSubtitle">Here is your music.</div>
         </div>
@@ -1192,7 +1177,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260928-2"></script>
+  <script src="app.js?v=20260928-1"></script>
 
 </body>
 </html>

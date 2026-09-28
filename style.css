@@ -135,7 +135,6 @@ svg { display: block; overflow: visible; }
   --skeleton-a: #131313;
   --skeleton-b: #1c1c1c;
   --sheen: rgba(255, 255, 255, .1);
-  --scribble-ink: rgba(196, 208, 255, .2);
   --focus-ring: rgba(255, 255, 255, .55);
   --edit-badge-bg: rgba(10, 10, 10, .85);
   --modal-backdrop: rgba(0, 0, 0, .68);
@@ -214,7 +213,6 @@ svg { display: block; overflow: visible; }
   --skeleton-a: #ececec;
   --skeleton-b: #f6f6f6;
   --sheen: rgba(0, 0, 0, .04);
-  --scribble-ink: rgba(38, 52, 130, .26);
   --focus-ring: rgba(0, 0, 0, .4);
   --edit-badge-bg: rgba(255, 255, 255, .9);
   --modal-backdrop: rgba(20, 20, 20, .3);
@@ -237,7 +235,6 @@ html, body {
 
 #app {
   position: relative;
-  z-index: 1;
   width: 100%;
   min-height: 100vh;
   padding-bottom: 90px;
@@ -867,13 +864,7 @@ main { width: 100%; }
 }
 
 /* HOME DASHBOARD */
-.home-header {
-  position: relative;
-  margin-bottom: 26px;
-  /* room for the .thinker figure on the trailing side */
-  padding-inline-end: 104px;
-  min-height: 96px;
-}
+.home-header { margin-bottom: 26px; }
 
 .home-greeting {
   font-size: 26px;
@@ -1989,104 +1980,229 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
 }
 @keyframes homeSkeletonShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
-/* SCRIBBLE BACKGROUND — sharp ballpoint-pen doodles that draw
-   themselves, hold for a moment, then get "erased" from the start,
-   on a staggered loop so something is always being drawn. It's one
-   fixed inline <svg class="scribble-bg"> at the top of <body> (see
-   index.html) sitting behind #app, so cards/glass sit on top of it
-   and the lines only show in the gaps. Each path uses pathLength="1"
-   so one dasharray/dashoffset keyframe set works for every path,
-   whatever its real length; per-path timing comes from the --dur /
-   --delay custom properties set inline in the markup. Ink color is
-   the --scribble-ink token (see TOKENS). */
-.scribble-bg {
+/* =========================================================
+   LIVING BACKGROUND
+   ----------------------------------------------------------------
+   Replaces the old single overlay gradient. Layers, back to front:
+     orbs      3 huge soft lights drifting on their own slow paths
+               (transform-only animation = GPU-cheap)
+     sweep     a faint diagonal light streak crossing now and then
+     rise      glow that wakes up from the bottom while music plays
+     touch     spotlight that follows a finger / mouse (app.js)
+     grain     static film noise: kills gradient banding, adds depth
+     vignette  darkens the edges so content feels lit from the middle
+
+   Song colour: --aurora-a / --aurora-c follow the cover colour set by
+   updatePlayerDynamicColor(), and cross-fade over 1.6s via @property
+   (older WebViews simply switch instantly).
+   Page change: body[data-page] slides the orbs to a new spot, so
+   moving between tabs feels like the camera is moving.
+   ========================================================= */
+@property --aurora-a {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: rgba(178, 160, 219, .18);
+}
+@property --aurora-c {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: rgba(178, 160, 219, .55);
+}
+
+:root {
+  --aurora-b: rgba(112, 132, 255, .12);
+  --touch-core: rgba(255, 255, 255, .10);
+  --sweep-color: rgba(255, 255, 255, .05);
+  --vignette: rgba(0, 0, 0, .45);
+  --grain-opacity: .06;
+}
+:root[data-theme="light"] {
+  --aurora-b: rgba(112, 132, 255, .16);
+  --touch-core: rgba(120, 100, 200, .14);
+  --sweep-color: rgba(255, 255, 255, 0);
+  --vignette: rgba(0, 0, 0, .07);
+  --grain-opacity: .05;
+}
+
+.ambient-bg {
+  --aurora-a: var(--player-glow-soft);
+  --aurora-c: var(--player-glow);
   position: fixed;
   inset: 0;
-  width: 100%;
-  height: 100%;
   z-index: 0;
+  overflow: hidden;
   pointer-events: none;
+  contain: layout paint style;
+  transition: --aurora-a 1.6s ease, --aurora-c 1.6s ease;
 }
 
-.scribble-bg path {
-  fill: none;
-  stroke: var(--scribble-ink);
-  stroke-width: 1.35;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 1 1;
-  stroke-dashoffset: 1;
-  animation: scribbleDraw var(--dur, 12s) ease-in-out var(--delay, 0s) infinite;
-}
-
-/* 0-38% pen draws the stroke, 38-72% it rests, 72-100% it wipes away
-   from where it started (offset runs on past 0 to -1). */
-@keyframes scribbleDraw {
-  0%   { stroke-dashoffset: 1; }
-  38%  { stroke-dashoffset: 0; }
-  72%  { stroke-dashoffset: 0; }
-  100% { stroke-dashoffset: -1; }
-}
-
-/* THINKER — stick figure with a brain that is constantly being
-   scribbled on. Outline uses --text-secondary, the brain scribbles
-   use --accent so they are the sharpest thing in the drawing. The
-   scribbles reuse the same draw / hold / wipe keyframes as the
-   background doodles (scribbleDraw); the head also gives a tiny
-   "thinking hard" wobble, and a few sparks flicker beside it. */
-.thinker {
+.ambient-orbs {
   position: absolute;
-  top: -4px;
-  inset-inline-end: 0;
-  width: 92px;
-  height: 108px;
-  overflow: visible;
-  pointer-events: none;
+  inset: 0;
+  opacity: .82;
+  transition: opacity 1.4s ease;
+  will-change: transform;
+}
+body.is-playing .ambient-orbs { opacity: 1; }
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  width: min(92vmax, 1000px);
+  height: min(92vmax, 1000px);
+  will-change: transform;
+  transition: translate 1.8s var(--ease), opacity 1.4s ease;
+}
+.ambient-orb--a {
+  top: -32%; left: -38%;
+  background: radial-gradient(circle closest-side, var(--aurora-a), transparent);
+  animation: ambientDriftA 26s ease-in-out infinite alternate;
+  translate: var(--ax, 0) var(--ay, 0);
+}
+.ambient-orb--b {
+  bottom: -36%; right: -42%;
+  background: radial-gradient(circle closest-side, var(--aurora-b), transparent);
+  animation: ambientDriftB 34s ease-in-out infinite alternate;
+  translate: var(--bx, 0) var(--by, 0);
+}
+.ambient-orb--c {
+  top: 26%; left: 8%;
+  width: min(60vmax, 700px);
+  height: min(60vmax, 700px);
+  opacity: .3;
+  background: radial-gradient(circle closest-side, var(--aurora-c), transparent);
+  animation: ambientDriftC 30s ease-in-out infinite alternate;
+  translate: var(--cx, 0) var(--cy, 0);
+}
+body.is-playing .ambient-orb--c { opacity: .55; }
+
+@keyframes ambientDriftA {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(10vw, 8vh, 0) scale(1.08); }
+  100% { transform: translate3d(-4vw, 15vh, 0) scale(.96); }
+}
+@keyframes ambientDriftB {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(-12vw, -9vh, 0) scale(1.1); }
+  100% { transform: translate3d(5vw, -16vh, 0) scale(.94); }
+}
+@keyframes ambientDriftC {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(14vw, -12vh, 0) scale(1.15); }
+  100% { transform: translate3d(-10vw, 10vh, 0) scale(.9); }
 }
 
-.thinker line, .thinker path, .thinker circle {
-  fill: none;
-  stroke: var(--text-secondary);
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+/* Page -> where the lights sit. Home is the default (all zeros). */
+body[data-page="songsPage"],
+body[data-page="albumsPage"],
+body[data-page="albumDetailPage"] {
+  --ax: 22vw; --ay: 12vh; --bx: -16vw; --by: -10vh; --cx: -12vw; --cy: 16vh;
+}
+body[data-page="favoritesPage"],
+body[data-page="playlistsPage"],
+body[data-page="playlistDetailPage"],
+body[data-page="sharedPlaylistPage"] {
+  --ax: 6vw; --ay: 34vh; --bx: -26vw; --by: -22vh; --cx: 18vw; --cy: -14vh;
+}
+body[data-page="artistsPage"],
+body[data-page="artistDetailPage"] {
+  --ax: 30vw; --ay: -4vh; --bx: -6vw; --by: 8vh; --cx: -20vw; --cy: -6vh;
+}
+body[data-page="searchPage"] {
+  --ax: -10vw; --ay: 18vh; --bx: 12vw; --by: -26vh; --cx: 8vw; --cy: 24vh;
 }
 
-.thinker .thinker-brain {
-  stroke: var(--accent);
-  stroke-width: 1.6;
-  stroke-dasharray: 1 1;
-  stroke-dashoffset: 1;
-  animation: scribbleDraw 4.2s ease-in-out var(--delay, 0s) infinite;
+.ambient-sweep {
+  position: absolute;
+  inset: -20%;
+  background: linear-gradient(105deg, transparent 42%, var(--sweep-color) 50%, transparent 58%);
+  transform: translate3d(-70%, 0, 0);
+  animation: ambientSweep 18s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes ambientSweep {
+  0%   { transform: translate3d(-70%, 0, 0); }
+  42%  { transform: translate3d(70%, 0, 0); }
+  100% { transform: translate3d(70%, 0, 0); }
 }
 
-.thinker-head {
-  transform-origin: 60px 80px;
-  animation: thinkerWobble 3.4s ease-in-out infinite;
+/* Rises from the bottom edge (behind the mini player) only while a
+   song is playing. The outer layer fades in/out; the inner one does
+   the endless breathing, so stopping never snaps. */
+.ambient-rise {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 46%;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+body.is-playing .ambient-rise { opacity: 1; }
+.ambient-rise-core {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(80% 100% at 50% 100%, var(--aurora-c), transparent 70%);
+  transform-origin: 50% 100%;
+  animation: ambientBreath 4.2s ease-in-out infinite;
+  animation-play-state: paused;
+  will-change: transform, opacity;
+}
+body.is-playing .ambient-rise-core { animation-play-state: running; }
+@keyframes ambientBreath {
+  0%, 100% { transform: scale(1, .82); opacity: .35; }
+  50%      { transform: scale(1.06, 1); opacity: .7; }
 }
 
-.thinker .thinker-spark {
-  stroke: var(--accent);
-  stroke-width: 1.8;
-  animation: thinkerSpark 2.1s steps(1, end) infinite;
+.ambient-touch {
+  position: absolute;
+  left: 0; top: 0;
+  width: 360px; height: 360px;
+  margin: -180px 0 0 -180px;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, var(--touch-core), var(--aurora-a) 45%, transparent);
+  opacity: 0;
+  transition: opacity .7s ease;
+  will-change: transform, opacity;
+}
+.ambient-touch.on { opacity: 1; }
+
+.ambient-grain {
+  position: absolute;
+  inset: 0;
+  opacity: var(--grain-opacity);
+  background-size: 160px 160px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+:root[data-theme="light"] .ambient-grain { filter: invert(1); }
+
+.ambient-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(130% 100% at 50% 35%, transparent 52%, var(--vignette) 100%);
 }
 
-@keyframes thinkerWobble {
-  0%, 100% { transform: rotate(-2.5deg); }
-  50%      { transform: rotate(2.5deg); }
+/* Paused while the app is in the background (set from app.js) */
+html.ambient-paused .ambient-bg *,
+html.ambient-paused .ambient-bg *::before {
+  animation-play-state: paused !important;
 }
 
-@keyframes thinkerSpark {
-  0%   { opacity: 0; }
-  30%  { opacity: 1; }
-  60%  { opacity: 0; }
-  75%  { opacity: 1; }
-  100% { opacity: 0; }
+/* Low-end phones: fewer layers, same look */
+html[data-fx="lite"] .ambient-orb--c,
+html[data-fx="lite"] .ambient-sweep,
+html[data-fx="lite"] .ambient-touch { display: none; }
+html[data-fx="lite"] .ambient-orb--a { animation-duration: 44s; }
+html[data-fx="lite"] .ambient-orb--b { animation-duration: 56s; }
+
+@keyframes whitePlaylistAmbient {
+  0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
+  50%  { transform: translate3d(2%, 1.5%, 0) scale(1.035); }
+  100% { transform: translate3d(-1%, 2%, 0) scale(1.02); }
 }
 
 /* RESPONSIVE */
 @media (min-width: 700px) {
   body { max-width: 620px; margin: auto; background: var(--bg); }
+  #app { background: transparent; }
   .bottom-nav { left: 50%; right: auto; width: 620px; transform: translateX(-50%); }
   .mini-player { left: 50%; right: auto; width: 600px; transform: translateX(-50%); }
 }
@@ -2101,10 +2217,8 @@ body.is-playing .player-cover { animation: playerCoverBreathe 6s ease-in-out inf
   #app::before, #app::after, .mini-player::before,
   .skeleton-block, .cover-art, .page.active,
   body.is-playing .player-cover { animation: none !important; }
-  .scribble-bg path { animation: none !important; stroke-dashoffset: 0; }
-  .thinker .thinker-brain { animation: none !important; stroke-dashoffset: 0; }
-  .thinker-head, .thinker .thinker-spark { animation: none !important; }
-  .thinker .thinker-spark { opacity: 1; }
+  .ambient-orb, .ambient-sweep, .ambient-rise-core { animation: none !important; }
+  .ambient-touch { display: none !important; }
 }
 
 button:focus-visible,
