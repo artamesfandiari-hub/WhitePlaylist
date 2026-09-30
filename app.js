@@ -2625,20 +2625,49 @@ async function deleteAllSongs() {
   }
 }
 
-function forwardSong(song) {
+async function forwardSong(song) {
   if (!song?.id) return;
 
-  if (!tg || typeof tg.switchInlineQuery !== "function") {
+  if (!tg) {
     alert(t("forwardNeedsTelegram"));
     return;
   }
 
-  // switchInlineQuery() hands off to Telegram's own native
-  // recipient/chat picker — it does not open, close, or reload
-  // the Mini App. The query text is the track's actual name (not
-  // its Song ID); the Worker's inline handler searches only this
-  // user's own library for matches and lets them pick the exact
-  // track to send.
+  // Preferred path: Telegram's native "Share with" sheet, opened
+  // with WebApp.shareMessage() (Bot API 8.0+). The Worker first
+  // prepares the song's audio as a prepared inline message.
+  if (
+    typeof tg.shareMessage === "function" &&
+    (typeof tg.isVersionAtLeast !== "function" ||
+      tg.isVersionAtLeast("8.0"))
+  ) {
+    try {
+      const data = await api("/forward/prepare", {
+        method: "POST",
+        body: JSON.stringify({ song_id: song.id })
+      });
+
+      if (data?.message_id) {
+        tg.shareMessage(data.message_id);
+        return;
+      }
+    } catch (error) {
+      console.error("Forward (share sheet):", error);
+      // Fall through to the previous chat-picker behavior.
+    }
+  }
+
+  forwardSongViaInlineQuery(song);
+}
+
+// Previous behavior, kept as a fallback for older Telegram clients
+// or if the share sheet can't be prepared.
+function forwardSongViaInlineQuery(song) {
+  if (typeof tg?.switchInlineQuery !== "function") {
+    alert(t("forwardNeedsTelegram"));
+    return;
+  }
+
   const query =
     (song.title || "").trim();
 
