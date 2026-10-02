@@ -7455,20 +7455,47 @@ function shareProfile() {
 }
 
 
+
 /* ---------- Profile photo (Telegram avatar) ----------
    The photo is fetched with the signed initData header (an <img>
    tag can't send headers), turned into a blob URL, and cached per
    {user, version}. `avatar_version` changes whenever the user changes
    their Telegram photo, so a new photo is a cache miss and gets
-   downloaded; until then the same blob is reused. */
+   downloaded; until then the same blob is reused.
+
+   If the owner's own photo can't be shown, the reason is printed
+   under the name (see setAvatarDebug) so a broken setup can be
+   diagnosed from inside Telegram. */
 
 const profileAvatarCache = new Map();
+
+function setAvatarDebug(text) {
+  const hero = document.querySelector("#profileView .profile-hero");
+
+  if (!hero) return;
+
+  let el = document.getElementById("profileAvatarDebug");
+
+  if (!text || !profileState.isSelf) {
+    el?.remove();
+    return;
+  }
+
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "profileAvatarDebug";
+    el.className = "profile-avatar-debug";
+    hero.appendChild(el);
+  }
+
+  el.textContent = text;
+}
 
 async function fetchProfileAvatarUrl(telegramId, version) {
   const key = `${telegramId}:${version}`;
 
   if (profileAvatarCache.has(key)) {
-    return profileAvatarCache.get(key);
+    return { url: profileAvatarCache.get(key) };
   }
 
   const headers = {};
@@ -7491,11 +7518,21 @@ async function fetchProfileAvatarUrl(telegramId, version) {
         { headers, signal: controller.signal }
       );
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      let detail = "";
+
+      try {
+        detail = (await response.text()).slice(0, 140);
+      } catch (e) {}
+
+      return { error: `photo request failed (${response.status}) ${detail}` };
+    }
 
     const blob = await response.blob();
 
-    if (!blob.type.startsWith("image/")) return null;
+    if (!blob.type.startsWith("image/")) {
+      return { error: `photo response is not an image (type: ${blob.type || "none"})` };
+    }
 
     const url = URL.createObjectURL(blob);
 
@@ -7509,9 +7546,9 @@ async function fetchProfileAvatarUrl(telegramId, version) {
       profileAvatarCache.delete(oldest);
     }
 
-    return url;
+    return { url };
   } catch (error) {
-    return null;
+    return { error: `photo request error: ${error && error.name}: ${error && error.message}` };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -7521,19 +7558,30 @@ async function applyProfileAvatar() {
   const p = profileState.profile;
   const el = document.getElementById("profileAvatar");
 
-  if (!p || !el || !p.avatar_version) return;
+  if (!p || !el) return;
+
+  if (!p.avatar_version) {
+    // Private profiles never get a photo (by design); only report
+    // a missing photo on a profile the viewer is allowed to see.
+    if (!p.is_private) {
+      setAvatarDebug(
+        `no photo: ${p.avatar_error || "this user has no Telegram photo"}`
+      );
+    }
+
+    return;
+  }
 
   const token = profileState.requestToken;
   const telegramId = p.telegram_id;
   const version = p.avatar_version;
 
-  const url =
+  const result =
     await fetchProfileAvatarUrl(telegramId, version);
 
   const current = document.getElementById("profileAvatar");
 
   if (
-    !url ||
     !current ||
     token !== profileState.requestToken ||
     profileState.profile?.avatar_version !== version
@@ -7541,13 +7589,21 @@ async function applyProfileAvatar() {
     return;
   }
 
+  if (!result.url) {
+    setAvatarDebug(result.error || "photo could not be loaded");
+    return;
+  }
+
   const initial = current.textContent;
 
   current.innerHTML =
-    `<img src="${escapeHTML(url)}" alt="">`;
+    `<img src="${escapeHTML(result.url)}" alt="">`;
+
+  setAvatarDebug("");
 
   current.querySelector("img").addEventListener("error", () => {
     current.textContent = initial;
+    setAvatarDebug("photo downloaded but the browser could not display it");
   });
 }
 
@@ -7587,12 +7643,14 @@ async function refreshProfileAvatar() {
     }
 
     p.avatar_version = data.profile.avatar_version;
+    p.avatar_error = data.profile.avatar_error;
 
     if (!p.avatar_version) {
       const el = document.getElementById("profileAvatar");
 
       if (el) el.textContent = profileInitial(p.name);
 
+      applyProfileAvatar();
       return;
     }
 

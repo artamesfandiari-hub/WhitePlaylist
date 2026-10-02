@@ -2473,3 +2473,14 @@ input:focus-visible {
   display: block;
   object-fit: cover;
 }
+
+.profile-avatar-debug {
+  margin: 10px 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
