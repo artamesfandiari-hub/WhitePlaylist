@@ -6743,6 +6743,12 @@ function setupProfile() {
       );
     });
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshProfileAvatar();
+    }
+  });
+
   document
     .getElementById("profilePrivacyCancel")
     ?.addEventListener("click", closeProfilePrivacyModal);
@@ -6846,7 +6852,7 @@ function renderProfile() {
     `<div class="profile-hero">
       <div class="profile-banner"></div>
       <div class="profile-head">
-        <div class="profile-avatar">${escapeHTML(profileInitial(p.name))}</div>
+        <div class="profile-avatar" id="profileAvatar">${escapeHTML(profileInitial(p.name))}</div>
         ${badge}
       </div>
       <h1 class="profile-name" dir="auto">${escapeHTML(p.name)}</h1>
@@ -6865,6 +6871,7 @@ function renderProfile() {
         <strong>${escapeHTML(t("profPrivateTitle"))}</strong>
         <span>${escapeHTML(t("profPrivateText"))}</span>
       </div>`;
+    applyProfileAvatar();
     return;
   }
 
@@ -6922,6 +6929,8 @@ function renderProfile() {
   document
     .getElementById("profileShareButton")
     ?.addEventListener("click", shareProfile);
+
+  applyProfileAvatar();
 }
 
 function loadProfileTab(tab) {
@@ -7442,5 +7451,153 @@ function shareProfile() {
       .writeText(url)
       .then(() => alert(t("profLinkCopied")))
       .catch(() => {});
+  }
+}
+
+
+/* ---------- Profile photo (Telegram avatar) ----------
+   The photo is fetched with the signed initData header (an <img>
+   tag can't send headers), turned into a blob URL, and cached per
+   {user, version}. `avatar_version` changes whenever the user changes
+   their Telegram photo, so a new photo is a cache miss and gets
+   downloaded; until then the same blob is reused. */
+
+const profileAvatarCache = new Map();
+
+async function fetchProfileAvatarUrl(telegramId, version) {
+  const key = `${telegramId}:${version}`;
+
+  if (profileAvatarCache.has(key)) {
+    return profileAvatarCache.get(key);
+  }
+
+  const headers = {};
+
+  if (state.userId) {
+    headers["X-Telegram-User-Id"] = state.userId;
+  }
+
+  if (tg?.initData) {
+    headers["X-Telegram-Init-Data"] = tg.initData;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response =
+      await fetch(
+        `${API}/profile/${encodeURIComponent(telegramId)}/avatar?v=${encodeURIComponent(version)}`,
+        { headers, signal: controller.signal }
+      );
+
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+
+    if (!blob.type.startsWith("image/")) return null;
+
+    const url = URL.createObjectURL(blob);
+
+    profileAvatarCache.set(key, url);
+
+    // Keep memory small: drop the oldest photos beyond 20.
+    if (profileAvatarCache.size > 20) {
+      const oldest = profileAvatarCache.keys().next().value;
+
+      URL.revokeObjectURL(profileAvatarCache.get(oldest));
+      profileAvatarCache.delete(oldest);
+    }
+
+    return url;
+  } catch (error) {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function applyProfileAvatar() {
+  const p = profileState.profile;
+  const el = document.getElementById("profileAvatar");
+
+  if (!p || !el || !p.avatar_version) return;
+
+  const token = profileState.requestToken;
+  const telegramId = p.telegram_id;
+  const version = p.avatar_version;
+
+  const url =
+    await fetchProfileAvatarUrl(telegramId, version);
+
+  const current = document.getElementById("profileAvatar");
+
+  if (
+    !url ||
+    !current ||
+    token !== profileState.requestToken ||
+    profileState.profile?.avatar_version !== version
+  ) {
+    return;
+  }
+
+  const initial = current.textContent;
+
+  current.innerHTML =
+    `<img src="${escapeHTML(url)}" alt="">`;
+
+  current.querySelector("img").addEventListener("error", () => {
+    current.textContent = initial;
+  });
+}
+
+// If the user changes their Telegram photo and comes back to the app
+// while this page is open, pick up the new one. Only re-asks the
+// server for the profile (cheap) and swaps the photo if its version
+// changed; it never resets the tab or scroll position.
+async function refreshProfileAvatar() {
+  const p = profileState.profile;
+
+  if (
+    !p ||
+    p.is_private ||
+    !document
+      .getElementById("profilePage")
+      ?.classList.contains("active")
+  ) {
+    return;
+  }
+
+  const token = profileState.requestToken;
+
+  try {
+    const data =
+      await api(
+        profileState.isSelf
+          ? "/profile/me"
+          : `/profile/${encodeURIComponent(p.telegram_id)}`
+      );
+
+    if (
+      token !== profileState.requestToken ||
+      data.profile.telegram_id !== p.telegram_id ||
+      data.profile.avatar_version === p.avatar_version
+    ) {
+      return;
+    }
+
+    p.avatar_version = data.profile.avatar_version;
+
+    if (!p.avatar_version) {
+      const el = document.getElementById("profileAvatar");
+
+      if (el) el.textContent = profileInitial(p.name);
+
+      return;
+    }
+
+    applyProfileAvatar();
+  } catch (error) {
+    // Silent: a failed background refresh just keeps the old photo.
   }
 }

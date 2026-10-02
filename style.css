@@ -2228,6 +2228,7 @@ input:focus-visible {
   width: 78px;
   height: 78px;
   box-sizing: border-box;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2464,4 +2465,11 @@ input:focus-visible {
 .profile-privacy-option.selected .profile-privacy-dot {
   border-color: var(--text);
   background: radial-gradient(circle, var(--text) 0 4px, transparent 5px);
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
