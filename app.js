@@ -351,6 +351,12 @@ async function api(endpoint, options = {}) {
     headers["X-Telegram-User-Id"] = state.userId;
   }
 
+  // Profile endpoints authenticate with Telegram's signed initData
+  // (verified server-side), not the plain user-id header above.
+  if (endpoint.startsWith("/profile") && tg?.initData) {
+    headers["X-Telegram-Init-Data"] = tg.initData;
+  }
+
   if (options.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
@@ -413,6 +419,37 @@ async function api(endpoint, options = {}) {
 
 const I18N = {
   en: {
+    profAria: "Profile",
+    profLoading: "Loading...",
+    profNotFound: "This profile doesn't exist.",
+    profLoadFailed: "Couldn't load this. Try again.",
+    profPublic: "Public",
+    profPrivate: "Private",
+    profPublicHint: "Anyone can see your songs, playlists and favorites",
+    profPrivateHint: "Only you can see your content",
+    profPrivacyTitle: "Who can see your profile?",
+    profPrivacyBtn: "Privacy",
+    profShareBtn: "Share",
+    profShareText: "🎧 Check out my profile on White Playlist",
+    profLinkCopied: "Link copied",
+    profSaveFailed: "Couldn't update privacy. Try again.",
+    profPrivateTitle: "This profile is private",
+    profPrivateText: "Only the owner can see their content.",
+    profTabSongs: "All songs",
+    profTabPlaylists: "Playlists",
+    profTabFavorites: "Favorites",
+    profStatSongs: "Songs",
+    profStatPlaylists: "Playlists",
+    profStatFavorites: "Favorites",
+    profSearchPlaceholder: "Search songs",
+    profPlayAll: "Play all",
+    profShowMore: "Show more",
+    profResults: n => `${n} results`,
+    profSongsCount: n => `${n} songs`,
+    profNoSongs: "No songs yet.",
+    profNoSearchResults: "No songs match your search.",
+    profNoPlaylists: "No playlists yet.",
+    profNoFavorites: "No favorites yet.",
     subtitle: "Your music library",
     ariaSearch: "Search",
     ariaTheme: "Switch between light and dark theme",
@@ -559,6 +596,37 @@ const I18N = {
       "Delete all songs from your library? This cannot be undone and will remove them from playlists and favorites too."
   },
   fa: {
+    profAria: "پروفایل",
+    profLoading: "در حال بارگذاری...",
+    profNotFound: "این پروفایل وجود نداره.",
+    profLoadFailed: "بارگذاری نشد. دوباره امتحان کن.",
+    profPublic: "عمومی",
+    profPrivate: "خصوصی",
+    profPublicHint: "همه می‌تونن آهنگ‌ها، پلی‌لیست‌ها و علاقه‌مندی‌هات رو ببینن",
+    profPrivateHint: "فقط خودت محتوات رو می‌بینی",
+    profPrivacyTitle: "چه کسی پروفایلت رو ببینه؟",
+    profPrivacyBtn: "حریم خصوصی",
+    profShareBtn: "اشتراک‌گذاری",
+    profShareText: "🎧 پروفایل من توی White Playlist رو ببین",
+    profLinkCopied: "لینک کپی شد",
+    profSaveFailed: "تغییر حریم خصوصی انجام نشد. دوباره امتحان کن.",
+    profPrivateTitle: "این پروفایل خصوصیه",
+    profPrivateText: "فقط خود کاربر می‌تونه محتواش رو ببینه.",
+    profTabSongs: "همه آهنگ‌ها",
+    profTabPlaylists: "پلی‌لیست‌ها",
+    profTabFavorites: "علاقه‌مندی‌ها",
+    profStatSongs: "آهنگ",
+    profStatPlaylists: "پلی‌لیست",
+    profStatFavorites: "علاقه‌مندی",
+    profSearchPlaceholder: "جستجو بین آهنگ‌ها",
+    profPlayAll: "پخش همه",
+    profShowMore: "نمایش بیشتر",
+    profResults: n => `${n} نتیجه`,
+    profSongsCount: n => `${n} آهنگ`,
+    profNoSongs: "هنوز آهنگی نیست.",
+    profNoSearchResults: "آهنگی با این جستجو پیدا نشد.",
+    profNoPlaylists: "هنوز پلی‌لیستی نیست.",
+    profNoFavorites: "هنوز علاقه‌مندی‌ای نیست.",
     subtitle: "کتابخونه‌ی موزیک تو",
     ariaSearch: "جستجو",
     ariaTheme: "تغییر بین تم روشن و تیره",
@@ -796,6 +864,7 @@ async function init() {
   setupHomeNavigation();
   setupSmartMix();
   setupSharePlaylist();
+  setupProfile();
 
   renderHomeGreeting();
 
@@ -844,6 +913,14 @@ async function resolveTelegramLaunchContext() {
   const payload = getStartParam();
 
   if (!payload) return;
+
+  // Shared profile link: t.me/<bot>?start=profile_<telegram_id>
+  const profileLinkMatch = payload.match(/^profile_(\d+)$/);
+
+  if (profileLinkMatch) {
+    openProfile(profileLinkMatch[1]);
+    return;
+  }
 
   const playlistMatch = payload.match(
     /^playlist_([a-zA-Z0-9]+)$/
@@ -6611,3 +6688,759 @@ function handleCoverErrorForContainer(containerId, token, img) {
 }
 
 
+/* =========================================================
+   USER PROFILES (public / private)
+   ----------------------------------------------------------
+   Profile page for the signed-in user ("me") and for other
+   users (opened from a shared profile link). Everything shown
+   here comes from the /profile/* endpoints; whether a profile
+   may be seen is decided by the Worker on every request, never
+   by this file. Songs are rendered read-only (no edit/delete/
+   menu) and played through the existing playSong() player.
+   ========================================================= */
+
+const PROFILE_PAGE_SIZE = 30;
+
+const PROFILE_ICONS = {
+  globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c2.8 2.6 4.2 5.6 4.2 9s-1.4 6.4-4.2 9c-2.8-2.6-4.2-5.6-4.2-9S9.2 5.6 12 3Z"></path></svg>`,
+  lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.5"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>`,
+  share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"></path><path d="M8 8l4-4 4 4"></path><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"></path></svg>`,
+  play: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5Z"></path></svg>`
+};
+
+const profileState = {
+  requestToken: 0,
+  songsRequest: 0,
+  telegramId: null,
+  isSelf: false,
+  profile: null,
+  tab: "songs",
+  songs: [],
+  songsDone: false,
+  songsLoading: false,
+  songsQuery: "",
+  favorites: null,
+  playlists: null,
+  openPlaylist: null,
+  pendingVisibility: "private"
+};
+
+let profileSearchTimer = null;
+
+function setupProfile() {
+  document
+    .getElementById("profileButton")
+    ?.addEventListener("click", () => openProfile("me"));
+
+  const modal =
+    document.getElementById("profilePrivacyModal");
+
+  modal
+    ?.querySelectorAll(".profile-privacy-option")
+    .forEach(option => {
+      option.addEventListener("click", () =>
+        setPendingVisibility(option.dataset.visibility)
+      );
+    });
+
+  document
+    .getElementById("profilePrivacyCancel")
+    ?.addEventListener("click", closeProfilePrivacyModal);
+
+  document
+    .getElementById("profilePrivacySave")
+    ?.addEventListener("click", saveProfileVisibility);
+
+  modal?.addEventListener("click", event => {
+    if (event.target === modal) {
+      closeProfilePrivacyModal();
+    }
+  });
+}
+
+function profileInitial(name) {
+  const first =
+    Array.from(String(name || "").trim())[0];
+
+  return first ? first.toUpperCase() : "?";
+}
+
+async function openProfile(target) {
+  const token = ++profileState.requestToken;
+
+  profileState.songsRequest++;
+  profileState.profile = null;
+  profileState.tab = "songs";
+  profileState.songs = [];
+  profileState.songsDone = false;
+  profileState.songsLoading = false;
+  profileState.songsQuery = "";
+  profileState.favorites = null;
+  profileState.playlists = null;
+  profileState.openPlaylist = null;
+
+  const view = document.getElementById("profileView");
+
+  view.innerHTML =
+    `<div class="empty">${escapeHTML(t("profLoading"))}</div>`;
+
+  showPage("profilePage");
+
+  try {
+    const data =
+      await api(
+        target === "me"
+          ? "/profile/me"
+          : `/profile/${encodeURIComponent(target)}`
+      );
+
+    if (token !== profileState.requestToken) return;
+
+    profileState.profile = data.profile;
+    profileState.telegramId = data.profile.telegram_id;
+    profileState.isSelf = !!data.profile.is_self;
+
+    renderProfile();
+
+    if (!data.profile.is_private) {
+      loadProfileTab("songs");
+    }
+  } catch (error) {
+    if (token !== profileState.requestToken) return;
+
+    console.error("Profile:", error);
+
+    const message =
+      error.message === "Profile not found"
+        ? t("profNotFound")
+        : t("profLoadFailed");
+
+    view.innerHTML =
+      `<div class="empty">${escapeHTML(message)}</div>`;
+  }
+}
+
+function profileIsPublic() {
+  const p = profileState.profile;
+
+  return profileState.isSelf
+    ? p.visibility === "public"
+    : !p.is_private;
+}
+
+function renderProfile() {
+  const p = profileState.profile;
+  const view = document.getElementById("profileView");
+
+  if (!p || !view) return;
+
+  const isPublic = profileIsPublic();
+
+  const badge =
+    `<span class="profile-badge">
+      ${isPublic ? PROFILE_ICONS.globe : PROFILE_ICONS.lock}
+      ${escapeHTML(isPublic ? t("profPublic") : t("profPrivate"))}
+    </span>`;
+
+  const hero =
+    `<div class="profile-hero">
+      <div class="profile-banner"></div>
+      <div class="profile-head">
+        <div class="profile-avatar">${escapeHTML(profileInitial(p.name))}</div>
+        ${badge}
+      </div>
+      <h1 class="profile-name" dir="auto">${escapeHTML(p.name)}</h1>
+      ${
+        p.username
+          ? `<div class="profile-username" dir="ltr">@${escapeHTML(p.username)}</div>`
+          : ""
+      }
+    </div>`;
+
+  if (p.is_private) {
+    view.innerHTML =
+      hero +
+      `<div class="profile-private">
+        ${PROFILE_ICONS.lock}
+        <strong>${escapeHTML(t("profPrivateTitle"))}</strong>
+        <span>${escapeHTML(t("profPrivateText"))}</span>
+      </div>`;
+    return;
+  }
+
+  const counts = p.counts || {};
+
+  const stats =
+    `<div class="profile-stats">
+      <div class="profile-stat"><strong>${Number(counts.songs) || 0}</strong><span>${escapeHTML(t("profStatSongs"))}</span></div>
+      <div class="profile-stat"><strong>${Number(counts.playlists) || 0}</strong><span>${escapeHTML(t("profStatPlaylists"))}</span></div>
+      <div class="profile-stat"><strong>${Number(counts.favorites) || 0}</strong><span>${escapeHTML(t("profStatFavorites"))}</span></div>
+    </div>`;
+
+  const canShare =
+    profileState.isSelf && isPublic && p.share_url;
+
+  const actions =
+    profileState.isSelf
+      ? `<div class="profile-actions">
+          <button type="button" id="profilePrivacyButton">${escapeHTML(t("profPrivacyBtn"))}</button>
+          ${
+            canShare
+              ? `<button type="button" id="profileShareButton">${PROFILE_ICONS.share}${escapeHTML(t("profShareBtn"))}</button>`
+              : ""
+          }
+        </div>`
+      : "";
+
+  const tabs =
+    `<div class="profile-tabs" role="tablist">
+      ${["songs", "playlists", "favorites"]
+        .map(tab => {
+          const key =
+            { songs: "profTabSongs", playlists: "profTabPlaylists", favorites: "profTabFavorites" }[tab];
+
+          return `<button type="button" role="tab" class="profile-tab${profileState.tab === tab ? " active" : ""}" data-tab="${tab}">${escapeHTML(t(key))}</button>`;
+        })
+        .join("")}
+    </div>`;
+
+  view.innerHTML =
+    hero + stats + actions + tabs +
+    `<div id="profileTabContent"></div>`;
+
+  view.querySelectorAll(".profile-tab").forEach(button => {
+    button.addEventListener("click", () => {
+      profileState.openPlaylist = null;
+      loadProfileTab(button.dataset.tab);
+    });
+  });
+
+  document
+    .getElementById("profilePrivacyButton")
+    ?.addEventListener("click", openProfilePrivacyModal);
+
+  document
+    .getElementById("profileShareButton")
+    ?.addEventListener("click", shareProfile);
+}
+
+function loadProfileTab(tab) {
+  profileState.tab = tab;
+
+  document.querySelectorAll(".profile-tab").forEach(button => {
+    const active = button.dataset.tab === tab;
+
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  if (tab === "songs") {
+    renderProfileSongsShell();
+
+    if (!profileState.songs.length && !profileState.songsDone) {
+      loadProfileSongs(true);
+    } else {
+      updateProfileSongList();
+    }
+    return;
+  }
+
+  if (tab === "playlists") {
+    loadProfilePlaylists();
+    return;
+  }
+
+  loadProfileFavorites();
+}
+
+function profileSongHTML(song) {
+  const artist = song.artist || t("unknownArtist");
+  const duration =
+    song.duration ? formatTime(song.duration) : "";
+
+  return `
+    <div class="song-item" data-song-id="${song.id}">
+      <button
+        class="song-cover"
+        data-action="play"
+        data-id="${song.id}"
+        aria-label="Play ${escapeHTML(song.title || "song")}"
+      >
+        ${coverInnerHTML(song.cover_url, song.title)}
+      </button>
+
+      <button
+        class="song-info"
+        data-action="play"
+        data-id="${song.id}"
+        style="text-align:left"
+      >
+        <div class="song-title">${escapeHTML(song.title || t("unknown"))}</div>
+        <div class="song-meta">${escapeHTML(artist)}</div>
+      </button>
+
+      <div class="song-actions">
+        <span class="profile-duration">${escapeHTML(duration)}</span>
+      </div>
+    </div>`;
+}
+
+function renderProfileSongRows(container, list, emptyText) {
+  if (!list.length) {
+    container.innerHTML =
+      `<div class="empty">${escapeHTML(emptyText)}</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(profileSongHTML).join("");
+  bindSongButtons(container, list);
+}
+
+function playAllButtonHTML() {
+  return `<button type="button" class="profile-play-all" id="profilePlayAll">${PROFILE_ICONS.play}${escapeHTML(t("profPlayAll"))}</button>`;
+}
+
+function bindPlayAll(getList) {
+  document
+    .getElementById("profilePlayAll")
+    ?.addEventListener("click", () => {
+      const list = getList();
+
+      if (list.length) {
+        playSong(list[0], list);
+      }
+    });
+}
+
+/* ---------- Songs tab ---------- */
+
+function renderProfileSongsShell() {
+  const content = document.getElementById("profileTabContent");
+
+  if (!content) return;
+
+  content.innerHTML =
+    `<label class="profile-search">
+      <input
+        id="profileSearchInput"
+        type="search"
+        dir="auto"
+        autocomplete="off"
+        placeholder="${escapeHTML(t("profSearchPlaceholder"))}"
+        value="${escapeHTML(profileState.songsQuery)}"
+      >
+    </label>
+    <div class="profile-toolbar">
+      <span id="profileSongCount"></span>
+      ${playAllButtonHTML()}
+    </div>
+    <div id="profileSongList"></div>
+    <button type="button" class="profile-more hidden" id="profileMore">${escapeHTML(t("profShowMore"))}</button>`;
+
+  document
+    .getElementById("profileSearchInput")
+    .addEventListener("input", event => {
+      clearTimeout(profileSearchTimer);
+
+      const value = event.target.value.trim();
+
+      profileSearchTimer = setTimeout(() => {
+        if (value === profileState.songsQuery) return;
+
+        profileState.songsQuery = value;
+        profileState.songs = [];
+        profileState.songsDone = false;
+
+        loadProfileSongs(true);
+      }, 300);
+    });
+
+  document
+    .getElementById("profileMore")
+    .addEventListener("click", () => loadProfileSongs(false));
+
+  bindPlayAll(() => profileState.songs);
+}
+
+function updateProfileSongList() {
+  const list = document.getElementById("profileSongList");
+
+  if (!list) return;
+
+  renderProfileSongRows(
+    list,
+    profileState.songs,
+    profileState.songsQuery
+      ? t("profNoSearchResults")
+      : t("profNoSongs")
+  );
+
+  const countEl = document.getElementById("profileSongCount");
+
+  if (countEl) {
+    const total =
+      profileState.songsQuery
+        ? profileState.songs.length
+        : Number(profileState.profile?.counts?.songs) || profileState.songs.length;
+
+    countEl.textContent =
+      profileState.songsQuery
+        ? t("profResults")(total)
+        : t("profSongsCount")(total);
+  }
+
+  document
+    .getElementById("profileMore")
+    ?.classList.toggle(
+      "hidden",
+      profileState.songsDone || !profileState.songs.length
+    );
+}
+
+async function loadProfileSongs(reset) {
+  const token = profileState.requestToken;
+  const request = ++profileState.songsRequest;
+  const offset = reset ? 0 : profileState.songs.length;
+
+  profileState.songsLoading = true;
+
+  const more = document.getElementById("profileMore");
+
+  if (more) more.disabled = true;
+
+  try {
+    const params =
+      new URLSearchParams({
+        limit: String(PROFILE_PAGE_SIZE),
+        offset: String(offset),
+        q: profileState.songsQuery
+      });
+
+    const data =
+      await api(`/profile/${profileState.telegramId}/songs?${params}`);
+
+    if (
+      token !== profileState.requestToken ||
+      request !== profileState.songsRequest
+    ) {
+      return;
+    }
+
+    const batch = data.songs || [];
+
+    profileState.songs =
+      reset ? batch : profileState.songs.concat(batch);
+
+    profileState.songsDone = batch.length < PROFILE_PAGE_SIZE;
+  } catch (error) {
+    if (
+      token !== profileState.requestToken ||
+      request !== profileState.songsRequest
+    ) {
+      return;
+    }
+
+    console.error("Profile songs:", error);
+
+    const list = document.getElementById("profileSongList");
+
+    if (list) {
+      list.innerHTML =
+        `<div class="empty">${escapeHTML(t("profLoadFailed"))}</div>`;
+    }
+
+    return;
+  } finally {
+    if (request === profileState.songsRequest) {
+      profileState.songsLoading = false;
+
+      const btn = document.getElementById("profileMore");
+
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  if (profileState.tab === "songs") {
+    updateProfileSongList();
+  }
+}
+
+/* ---------- Playlists tab ---------- */
+
+async function loadProfilePlaylists() {
+  const content = document.getElementById("profileTabContent");
+
+  if (!content) return;
+
+  if (profileState.playlists) {
+    renderProfilePlaylists();
+    return;
+  }
+
+  const token = profileState.requestToken;
+
+  content.innerHTML =
+    `<div class="empty">${escapeHTML(t("profLoading"))}</div>`;
+
+  try {
+    const data =
+      await api(`/profile/${profileState.telegramId}/playlists`);
+
+    if (token !== profileState.requestToken) return;
+
+    profileState.playlists = data.playlists || [];
+  } catch (error) {
+    if (token !== profileState.requestToken) return;
+
+    console.error("Profile playlists:", error);
+
+    content.innerHTML =
+      `<div class="empty">${escapeHTML(t("profLoadFailed"))}</div>`;
+
+    return;
+  }
+
+  if (profileState.tab === "playlists") {
+    renderProfilePlaylists();
+  }
+}
+
+function renderProfilePlaylists() {
+  const content = document.getElementById("profileTabContent");
+
+  if (!content) return;
+
+  const playlists = profileState.playlists || [];
+
+  if (!playlists.length) {
+    content.innerHTML =
+      `<div class="empty">${escapeHTML(t("profNoPlaylists"))}</div>`;
+    return;
+  }
+
+  content.innerHTML =
+    `<div class="profile-playlist-grid">
+      ${playlists
+        .map(
+          playlist => `
+        <button type="button" class="profile-playlist-card" data-playlist="${playlist.id}">
+          <div class="profile-playlist-cover">${coverInnerHTML(playlist.cover_url, playlist.name)}</div>
+          <div class="profile-playlist-name" dir="auto">${escapeHTML(playlist.name)}</div>
+          <div class="profile-playlist-count">${escapeHTML(t("profSongsCount")(Number(playlist.song_count) || 0))}</div>
+        </button>`
+        )
+        .join("")}
+    </div>`;
+
+  content
+    .querySelectorAll(".profile-playlist-card")
+    .forEach(card => {
+      card.addEventListener("click", () =>
+        openProfilePlaylist(Number(card.dataset.playlist))
+      );
+    });
+}
+
+async function openProfilePlaylist(playlistId) {
+  const content = document.getElementById("profileTabContent");
+
+  if (!content) return;
+
+  const token = profileState.requestToken;
+
+  content.innerHTML =
+    `<div class="empty">${escapeHTML(t("profLoading"))}</div>`;
+
+  try {
+    const data =
+      await api(
+        `/profile/${profileState.telegramId}/playlists/${playlistId}/songs`
+      );
+
+    if (
+      token !== profileState.requestToken ||
+      profileState.tab !== "playlists"
+    ) {
+      return;
+    }
+
+    const songs = data.songs || [];
+
+    profileState.openPlaylist = data.playlist;
+
+    content.innerHTML =
+      `<button type="button" class="profile-subback" id="profilePlaylistBack">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 5 8 12 15 19"></polyline></svg>
+        ${escapeHTML(t("profTabPlaylists"))}
+      </button>
+      <h2 class="profile-playlist-title" dir="auto">${escapeHTML(data.playlist.name)}</h2>
+      <div class="profile-toolbar">
+        <span>${escapeHTML(t("profSongsCount")(songs.length))}</span>
+        ${playAllButtonHTML()}
+      </div>
+      <div id="profilePlaylistSongs"></div>`;
+
+    renderProfileSongRows(
+      document.getElementById("profilePlaylistSongs"),
+      songs,
+      t("profNoSongs")
+    );
+
+    bindPlayAll(() => songs);
+
+    document
+      .getElementById("profilePlaylistBack")
+      .addEventListener("click", () => {
+        profileState.openPlaylist = null;
+        renderProfilePlaylists();
+      });
+  } catch (error) {
+    if (token !== profileState.requestToken) return;
+
+    console.error("Profile playlist:", error);
+
+    content.innerHTML =
+      `<div class="empty">${escapeHTML(t("profLoadFailed"))}</div>`;
+  }
+}
+
+/* ---------- Favorites tab ---------- */
+
+async function loadProfileFavorites() {
+  const content = document.getElementById("profileTabContent");
+
+  if (!content) return;
+
+  const render = () => {
+    const list = profileState.favorites || [];
+
+    content.innerHTML =
+      `<div class="profile-toolbar">
+        <span>${escapeHTML(t("profSongsCount")(list.length))}</span>
+        ${list.length ? playAllButtonHTML() : ""}
+      </div>
+      <div id="profileFavoriteList"></div>`;
+
+    renderProfileSongRows(
+      document.getElementById("profileFavoriteList"),
+      list,
+      t("profNoFavorites")
+    );
+
+    bindPlayAll(() => list);
+  };
+
+  if (profileState.favorites) {
+    render();
+    return;
+  }
+
+  const token = profileState.requestToken;
+
+  content.innerHTML =
+    `<div class="empty">${escapeHTML(t("profLoading"))}</div>`;
+
+  try {
+    const data =
+      await api(`/profile/${profileState.telegramId}/favorites`);
+
+    if (token !== profileState.requestToken) return;
+
+    profileState.favorites = data.favorites || [];
+  } catch (error) {
+    if (token !== profileState.requestToken) return;
+
+    console.error("Profile favorites:", error);
+
+    content.innerHTML =
+      `<div class="empty">${escapeHTML(t("profLoadFailed"))}</div>`;
+
+    return;
+  }
+
+  if (profileState.tab === "favorites") {
+    render();
+  }
+}
+
+/* ---------- Privacy sheet + sharing ---------- */
+
+function setPendingVisibility(value) {
+  profileState.pendingVisibility =
+    value === "public" ? "public" : "private";
+
+  document
+    .querySelectorAll("#profilePrivacyModal .profile-privacy-option")
+    .forEach(option => {
+      const selected =
+        option.dataset.visibility === profileState.pendingVisibility;
+
+      option.classList.toggle("selected", selected);
+      option.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+}
+
+function openProfilePrivacyModal() {
+  setPendingVisibility(
+    profileState.profile?.visibility === "public"
+      ? "public"
+      : "private"
+  );
+
+  document
+    .getElementById("profilePrivacyModal")
+    ?.classList.remove("hidden");
+}
+
+function closeProfilePrivacyModal() {
+  document
+    .getElementById("profilePrivacyModal")
+    ?.classList.add("hidden");
+}
+
+async function saveProfileVisibility() {
+  const button =
+    document.getElementById("profilePrivacySave");
+
+  const visibility = profileState.pendingVisibility;
+
+  if (button) button.disabled = true;
+
+  try {
+    await api("/profile/me", {
+      method: "PUT",
+      body: JSON.stringify({ visibility })
+    });
+
+    profileState.profile.visibility = visibility;
+
+    closeProfilePrivacyModal();
+    renderProfile();
+    loadProfileTab(profileState.tab);
+  } catch (error) {
+    console.error("Profile visibility:", error);
+    alert(t("profSaveFailed"));
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function shareProfile() {
+  const url = profileState.profile?.share_url;
+
+  if (!url) return;
+
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(
+      `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(t("profShareText"))}`
+    );
+    return;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(url)
+      .then(() => alert(t("profLinkCopied")))
+      .catch(() => {});
+  }
+}

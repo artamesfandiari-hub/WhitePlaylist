@@ -48,7 +48,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20260928-1">
+  <link rel="stylesheet" href="style.css?v=20261002-1">
 </head>
 
 <body>
@@ -64,6 +64,18 @@
       </div>
 
       <div class="topbar-actions">
+
+        <button
+          class="icon-button"
+          id="profileButton"
+          aria-label="Profile"
+          data-i18n-aria="profAria"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8.5" r="4"></circle>
+            <path d="M4.5 20c.9-3.6 3.9-5.5 7.5-5.5s6.6 1.9 7.5 5.5"></path>
+          </svg>
+        </button>
 
         <button
           class="icon-button"
@@ -468,6 +480,24 @@
         <div id="sharedPlaylistDetail"></div>
       </section>
 
+      <!-- PROFILE (own profile, or another user's via a shared link) -->
+      <section
+        class="page"
+        id="profilePage"
+      >
+        <button
+          class="back-button"
+          data-back="homePage"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polyline points="15 5 8 12 15 19"></polyline>
+          </svg>
+          <span data-i18n="homeWord">Home</span>
+        </button>
+
+        <div id="profileView"></div>
+      </section>
+
       <!-- SEARCH RESULTS -->
       <section
         class="page"
@@ -710,6 +740,41 @@
           Close
         </button>
 
+      </div>
+    </div>
+
+    <!-- PROFILE PRIVACY SHEET -->
+    <div
+      class="modal hidden"
+      id="profilePrivacyModal"
+    >
+      <div class="modal-card">
+        <h2 data-i18n="profPrivacyTitle">Who can see your profile?</h2>
+
+        <div class="profile-privacy-options">
+          <button type="button" class="profile-privacy-option" data-visibility="public" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c2.8 2.6 4.2 5.6 4.2 9s-1.4 6.4-4.2 9c-2.8-2.6-4.2-5.6-4.2-9S9.2 5.6 12 3Z"></path></svg>
+            <span class="profile-privacy-text">
+              <strong data-i18n="profPublic">Public</strong>
+              <small data-i18n="profPublicHint">Anyone can see your songs, playlists and favorites</small>
+            </span>
+            <span class="profile-privacy-dot" aria-hidden="true"></span>
+          </button>
+
+          <button type="button" class="profile-privacy-option" data-visibility="private" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.5"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+            <span class="profile-privacy-text">
+              <strong data-i18n="profPrivate">Private</strong>
+              <small data-i18n="profPrivateHint">Only you can see your content</small>
+            </span>
+            <span class="profile-privacy-dot" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="profilePrivacyCancel" data-i18n="cancel">Cancel</button>
+          <button type="button" class="primary-button" id="profilePrivacySave" data-i18n="saveWord">Save</button>
+        </div>
       </div>
     </div>
 
@@ -1160,7 +1225,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20260921-1"></script>
+  <script src="app.js?v=20261002-1"></script>
 
 </body>
 </html>

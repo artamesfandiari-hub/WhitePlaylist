@@ -2199,3 +2199,269 @@ input:focus-visible {
 .mini-like svg, .mini-like.active svg {
   stroke-width: 2 !important;
 }
+
+
+/* =========================================================
+   USER PROFILES
+   ========================================================= */
+
+.profile-hero { margin-bottom: 4px; }
+
+.profile-banner {
+  height: 92px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(150deg, var(--accent-glow-soft), transparent 75%),
+    var(--surface);
+}
+
+.profile-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: -38px;
+  padding: 0 8px;
+}
+
+.profile-avatar {
+  width: 78px;
+  height: 78px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 3px solid var(--bg);
+  background: var(--cover-gradient-playlist);
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-badge svg { width: 14px; height: 14px; }
+
+.profile-name {
+  margin: 12px 8px 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.2px;
+}
+
+.profile-username {
+  margin: 2px 8px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.profile-stats {
+  display: flex;
+  gap: 28px;
+  margin: 16px 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-stat strong { display: block; font-size: 18px; font-weight: 800; }
+.profile-stat span { color: var(--text-secondary); font-size: 12px; }
+
+.profile-actions { display: flex; gap: 10px; margin: 0 8px 16px; }
+
+.profile-actions button {
+  flex: 1;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profile-actions button:active { background: var(--glass-fill-active); }
+.profile-actions svg { width: 16px; height: 16px; }
+
+.profile-tabs {
+  display: flex;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-tab {
+  flex: 1;
+  margin-bottom: -1px;
+  padding: 11px 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.profile-tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+.profile-search { display: block; margin-bottom: 8px; }
+
+.profile-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.profile-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 2px 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.profile-play-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-play-all svg { width: 13px; height: 13px; }
+
+.profile-duration { color: var(--text-muted); font-size: 12px; padding-right: 6px; }
+
+.profile-more {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profile-more:disabled { opacity: .5; }
+
+.profile-playlist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 14px;
+}
+
+.profile-playlist-card { text-align: left; color: var(--text); }
+
+.profile-playlist-cover {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--cover-gradient-playlist);
+}
+
+.profile-playlist-cover svg { width: 34px; height: 34px; }
+.profile-playlist-cover img { width: 100%; height: 100%; object-fit: cover; }
+.profile-playlist-name { margin-top: 8px; font-size: 14px; font-weight: 700; }
+.profile-playlist-count { color: var(--text-secondary); font-size: 12px; }
+
+.profile-subback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-subback svg { width: 16px; height: 16px; }
+.profile-playlist-title { margin: 4px 2px 0; font-size: 20px; font-weight: 800; }
+
+.profile-private {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 18px 8px;
+  padding: 28px 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  text-align: center;
+}
+
+.profile-private svg { width: 28px; height: 28px; color: var(--text-secondary); }
+.profile-private strong { font-size: 15px; }
+.profile-private span { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+
+.profile-privacy-options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+
+.profile-privacy-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  color: var(--text);
+  text-align: left;
+}
+
+.profile-privacy-option.selected { border-color: var(--text); background: var(--glass-fill-active); }
+.profile-privacy-option > svg { width: 22px; height: 22px; flex-shrink: 0; }
+.profile-privacy-text { flex: 1; min-width: 0; }
+.profile-privacy-text strong { display: block; font-size: 14px; font-weight: 800; }
+
+.profile-privacy-text small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.profile-privacy-dot {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+}
+
+.profile-privacy-option.selected .profile-privacy-dot {
+  border-color: var(--text);
+  background: radial-gradient(circle, var(--text) 0 4px, transparent 5px);
+}
