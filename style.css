@@ -2208,6 +2208,8 @@ input:focus-visible {
 .profile-hero { margin-bottom: 4px; }
 
 .profile-banner {
+  position: relative;
+  overflow: hidden;
   height: 92px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
@@ -2217,6 +2219,8 @@ input:focus-visible {
 }
 
 .profile-head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -2474,13 +2478,19 @@ input:focus-visible {
   object-fit: cover;
 }
 
-.profile-avatar-debug {
-  margin: 10px 8px 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--border-strong);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  word-break: break-word;
+/* Blurred profile photo behind the avatar */
+.profile-banner-photo {
+  position: absolute;
+  inset: -30px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(22px) saturate(1.3);
+  opacity: .85;
+}
+
+.profile-banner:has(.profile-banner-photo)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 35%, var(--bg) 135%);
 }

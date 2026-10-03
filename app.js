@@ -7469,26 +7469,36 @@ function shareProfile() {
 
 const profileAvatarCache = new Map();
 
+// Photo problems are only logged (never shown): the letter avatar
+// simply stays. Open the Telegram WebView inspector / browser console
+// to read the reason.
 function setAvatarDebug(text) {
-  const hero = document.querySelector("#profileView .profile-hero");
-
-  if (!hero) return;
-
-  let el = document.getElementById("profileAvatarDebug");
-
-  if (!text || !profileState.isSelf) {
-    el?.remove();
-    return;
+  if (text && profileState.isSelf) {
+    console.warn("Profile photo:", text);
   }
+}
 
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "profileAvatarDebug";
-    el.className = "profile-avatar-debug";
-    hero.appendChild(el);
-  }
+// Blurred copy of the profile photo as the page banner. Removed again
+// when there is no photo (or it can't be shown), leaving the plain
+// banner background.
+function setProfileBanner(url) {
+  const banner =
+    document.querySelector("#profileView .profile-banner");
 
-  el.textContent = text;
+  if (!banner) return;
+
+  banner
+    .querySelectorAll(".profile-banner-photo")
+    .forEach(el => el.remove());
+
+  if (!url) return;
+
+  const photo = document.createElement("div");
+
+  photo.className = "profile-banner-photo";
+  photo.style.backgroundImage = `url("${url}")`;
+
+  banner.appendChild(photo);
 }
 
 async function fetchProfileAvatarUrl(telegramId, version) {
@@ -7566,6 +7576,8 @@ async function applyProfileAvatar() {
   if (!p || !el) return;
 
   if (!p.avatar_version) {
+    setProfileBanner(null);
+
     // Private profiles never get a photo (by design); only report
     // a missing photo on a profile the viewer is allowed to see.
     if (!p.is_private) {
@@ -7595,6 +7607,7 @@ async function applyProfileAvatar() {
   }
 
   if (!result.url) {
+    setProfileBanner(null);
     setAvatarDebug(result.error || "photo could not be loaded");
     return;
   }
@@ -7604,10 +7617,11 @@ async function applyProfileAvatar() {
   current.innerHTML =
     `<img src="${escapeHTML(result.url)}" alt="">`;
 
-  setAvatarDebug("");
+  setProfileBanner(result.url);
 
   current.querySelector("img").addEventListener("error", () => {
     current.textContent = initial;
+    setProfileBanner(null);
     setAvatarDebug("photo downloaded but the browser could not display it");
   });
 }
