@@ -7528,10 +7528,15 @@ async function fetchProfileAvatarUrl(telegramId, version) {
       return { error: `photo request failed (${response.status}) ${detail}` };
     }
 
-    const blob = await response.blob();
+    let blob = await response.blob();
 
+    // The server labels profile photos as images, but don't depend
+    // on it: if the label is missing or generic (e.g. octet-stream),
+    // re-label the same bytes as JPEG so the browser draws them.
+    // If the bytes aren't really an image the <img> error handler
+    // below reports it.
     if (!blob.type.startsWith("image/")) {
-      return { error: `photo response is not an image (type: ${blob.type || "none"})` };
+      blob = new Blob([blob], { type: "image/jpeg" });
     }
 
     const url = URL.createObjectURL(blob);
