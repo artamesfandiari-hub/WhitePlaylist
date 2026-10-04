@@ -420,6 +420,14 @@ async function api(endpoint, options = {}) {
 const I18N = {
   en: {
     profAria: "Profile",
+    profLike: "Like",
+    profUnlike: "Remove like",
+    profLikeFailed: "Couldn't update the like. Try again.",
+    profAddToMyPlaylist: "Add to my playlist",
+    profCreatePlaylistFirst: "Create a playlist first.",
+    profAddedTo: name => `Added to ${name}`,
+    profAlreadyIn: name => `Already in ${name}`,
+    profAddFailed: "Couldn't add the song. Try again.",
     profLoading: "Loading...",
     profNotFound: "This profile doesn't exist.",
     profLoadFailed: "Couldn't load this. Try again.",
@@ -597,6 +605,14 @@ const I18N = {
   },
   fa: {
     profAria: "پروفایل",
+    profLike: "پسندیدن",
+    profUnlike: "برداشتن پسند",
+    profLikeFailed: "لایک ثبت نشد. دوباره امتحان کن.",
+    profAddToMyPlaylist: "افزودن به پلی‌لیست من",
+    profCreatePlaylistFirst: "اول یه پلی‌لیست بساز.",
+    profAddedTo: name => `به ${name} اضافه شد`,
+    profAlreadyIn: name => `از قبل توی ${name} هست`,
+    profAddFailed: "آهنگ اضافه نشد. دوباره امتحان کن.",
     profLoading: "در حال بارگذاری...",
     profNotFound: "این پروفایل وجود نداره.",
     profLoadFailed: "بارگذاری نشد. دوباره امتحان کن.",
@@ -6705,7 +6721,8 @@ const PROFILE_ICONS = {
   globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c2.8 2.6 4.2 5.6 4.2 9s-1.4 6.4-4.2 9c-2.8-2.6-4.2-5.6-4.2-9S9.2 5.6 12 3Z"></path></svg>`,
   lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.5"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>`,
   share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"></path><path d="M8 8l4-4 4 4"></path><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"></path></svg>`,
-  play: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5Z"></path></svg>`
+  play: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5Z"></path></svg>`,
+  heart: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.7c0 5.1-8.8 10.1-8.8 10.1S3.2 13.8 3.2 8.7A4.7 4.7 0 0 1 12 6.5a4.7 4.7 0 0 1 8.8 2.2Z"></path></svg>`
 };
 
 const profileState = {
@@ -6722,6 +6739,9 @@ const profileState = {
   favorites: null,
   playlists: null,
   openPlaylist: null,
+  playlistSongs: [],
+  likePending: new Set(),
+  menuSong: null,
   pendingVisibility: "private"
 };
 
@@ -6747,6 +6767,27 @@ function setupProfile() {
     if (document.visibilityState === "visible") {
       refreshProfileAvatar();
     }
+  });
+
+  const songMenu =
+    document.getElementById("profileSongMenuModal");
+
+  document
+    .getElementById("profileSongMenuAdd")
+    ?.addEventListener("click", () => {
+      const song = profileState.menuSong;
+
+      closeProfileSongMenu();
+
+      if (song) openProfileAddToPlaylist(song);
+    });
+
+  document
+    .getElementById("profileSongMenuClose")
+    ?.addEventListener("click", closeProfileSongMenu);
+
+  songMenu?.addEventListener("click", event => {
+    if (event.target === songMenu) closeProfileSongMenu();
   });
 
   document
@@ -6784,6 +6825,8 @@ async function openProfile(target) {
   profileState.favorites = null;
   profileState.playlists = null;
   profileState.openPlaylist = null;
+  profileState.playlistSongs = [];
+  profileState.likePending = new Set();
 
   const view = document.getElementById("profileView");
 
@@ -6962,10 +7005,58 @@ function loadProfileTab(tab) {
   loadProfileFavorites();
 }
 
+function formatLikeCount(n) {
+  const count = Number(n) || 0;
+
+  if (count < 1000) return String(count);
+
+  return (
+    (count / 1000)
+      .toFixed(count < 10000 ? 1 : 0)
+      .replace(/\.0$/, "") + "K"
+  );
+}
+
+function likeButtonHTML(song) {
+  const liked = !!song.liked;
+  const count = Number(song.like_count) || 0;
+
+  return `
+    <button
+      type="button"
+      class="profile-like-btn${liked ? " liked" : ""}"
+      data-profile-like="${song.id}"
+      aria-pressed="${liked}"
+      aria-label="${escapeHTML(t(liked ? "profUnlike" : "profLike"))}"
+    >
+      ${PROFILE_ICONS.heart}
+      <span class="profile-like-count">${count > 0 ? formatLikeCount(count) : ""}</span>
+    </button>`;
+}
+
+// Rows on a profile are read-only. Everyone gets a Like button with
+// its count; only visitors (not the owner) get the ⋯ menu, which has
+// a single option: add the song to one of their own playlists. The
+// owner manages songs from their own playlist pages instead.
 function profileSongHTML(song) {
   const artist = song.artist || t("unknownArtist");
   const duration =
     song.duration ? formatTime(song.duration) : "";
+
+  const meta =
+    duration ? `${artist} · ${duration}` : artist;
+
+  const menu =
+    profileState.isSelf
+      ? ""
+      : `<button
+          type="button"
+          class="song-menu-btn"
+          data-profile-menu="${song.id}"
+          aria-label="More options"
+        >
+          ${ICONS.dots}
+        </button>`;
 
   return `
     <div class="song-item" data-song-id="${song.id}">
@@ -6985,11 +7076,12 @@ function profileSongHTML(song) {
         style="text-align:left"
       >
         <div class="song-title">${escapeHTML(song.title || t("unknown"))}</div>
-        <div class="song-meta">${escapeHTML(artist)}</div>
+        <div class="song-meta">${escapeHTML(meta)}</div>
       </button>
 
-      <div class="song-actions">
-        <span class="profile-duration">${escapeHTML(duration)}</span>
+      <div class="song-actions profile-song-actions">
+        ${likeButtonHTML(song)}
+        ${menu}
       </div>
     </div>`;
 }
@@ -7003,6 +7095,7 @@ function renderProfileSongRows(container, list, emptyText) {
 
   container.innerHTML = list.map(profileSongHTML).join("");
   bindSongButtons(container, list);
+  bindProfileSongActions(container, list);
 }
 
 function playAllButtonHTML() {
@@ -7276,6 +7369,7 @@ async function openProfilePlaylist(playlistId) {
     const songs = data.songs || [];
 
     profileState.openPlaylist = data.playlist;
+    profileState.playlistSongs = songs;
 
     content.innerHTML =
       `<button type="button" class="profile-subback" id="profilePlaylistBack">
@@ -7301,6 +7395,7 @@ async function openProfilePlaylist(playlistId) {
       .getElementById("profilePlaylistBack")
       .addEventListener("click", () => {
         profileState.openPlaylist = null;
+        profileState.playlistSongs = [];
         renderProfilePlaylists();
       });
   } catch (error) {
@@ -7677,4 +7772,246 @@ async function refreshProfileAvatar() {
   } catch (error) {
     // Silent: a failed background refresh just keeps the old photo.
   }
+}
+
+
+/* ---------- Likes + "add to my playlist" on profile songs ---------- */
+
+function findProfileSong(songId) {
+  const lists = [
+    profileState.songs,
+    profileState.favorites || [],
+    profileState.playlistSongs || []
+  ];
+
+  for (const list of lists) {
+    const song = list.find(item => Number(item.id) === Number(songId));
+
+    if (song) return song;
+  }
+
+  return null;
+}
+
+// Writes a song's like state into every loaded copy of it (the
+// All songs / Favorites / open-playlist lists) and into every button
+// currently on screen, so the heart and the count always agree.
+function applyProfileLike(songId, liked, count) {
+  [
+    profileState.songs,
+    profileState.favorites || [],
+    profileState.playlistSongs || []
+  ].forEach(list => {
+    list.forEach(song => {
+      if (Number(song.id) === Number(songId)) {
+        song.liked = liked;
+        song.like_count = count;
+      }
+    });
+  });
+
+  document
+    .querySelectorAll(`[data-profile-like="${Number(songId)}"]`)
+    .forEach(button => {
+      button.classList.toggle("liked", liked);
+      button.setAttribute("aria-pressed", liked ? "true" : "false");
+      button.setAttribute(
+        "aria-label",
+        t(liked ? "profUnlike" : "profLike")
+      );
+
+      const label = button.querySelector(".profile-like-count");
+
+      if (label) {
+        label.textContent =
+          count > 0 ? formatLikeCount(count) : "";
+      }
+    });
+}
+
+async function toggleProfileLike(songId) {
+  if (profileState.likePending.has(songId)) return;
+
+  const song = findProfileSong(songId);
+
+  if (!song) return;
+
+  const token = profileState.requestToken;
+  const telegramId = profileState.telegramId;
+  const wasLiked = !!song.liked;
+  const wasCount = Number(song.like_count) || 0;
+  const nextLiked = !wasLiked;
+
+  // Optimistic update; the server's answer replaces it below.
+  applyProfileLike(
+    songId,
+    nextLiked,
+    Math.max(0, wasCount + (nextLiked ? 1 : -1))
+  );
+
+  profileState.likePending.add(songId);
+
+  try {
+    const data =
+      await api(
+        `/profile/${encodeURIComponent(telegramId)}/songs/${songId}/like`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ liked: nextLiked })
+        }
+      );
+
+    if (token === profileState.requestToken) {
+      applyProfileLike(songId, !!data.liked, Number(data.like_count) || 0);
+    }
+  } catch (error) {
+    console.error("Profile like:", error);
+
+    if (token === profileState.requestToken) {
+      applyProfileLike(songId, wasLiked, wasCount);
+    }
+
+    showToast(t("profLikeFailed"));
+  } finally {
+    profileState.likePending.delete(songId);
+  }
+}
+
+function bindProfileSongActions(container, list) {
+  container
+    .querySelectorAll("[data-profile-like]")
+    .forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        toggleProfileLike(Number(button.dataset.profileLike));
+      });
+    });
+
+  container
+    .querySelectorAll("[data-profile-menu]")
+    .forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const song =
+          list.find(
+            item => Number(item.id) === Number(button.dataset.profileMenu)
+          );
+
+        if (song) openProfileSongMenu(song);
+      });
+    });
+}
+
+function openProfileSongMenu(song) {
+  profileState.menuSong = song;
+
+  const title = document.getElementById("profileSongMenuTitle");
+
+  if (title) title.textContent = song.title || t("unknown");
+
+  document
+    .getElementById("profileSongMenuModal")
+    ?.classList.remove("hidden");
+}
+
+function closeProfileSongMenu() {
+  document
+    .getElementById("profileSongMenuModal")
+    ?.classList.add("hidden");
+}
+
+// Same playlist picker the rest of the app uses, but the song is
+// added through the profile endpoint (the song belongs to someone
+// else, so the server copies it into the visitor's library first).
+async function openProfileAddToPlaylist(song) {
+  const modal = document.getElementById("addToPlaylistModal");
+  const list = document.getElementById("addPlaylistList");
+
+  if (!modal || !list) return;
+
+  const token = profileState.requestToken;
+  const telegramId = profileState.telegramId;
+
+  list.innerHTML =
+    `<div class="loading">${escapeHTML(t("profLoading"))}</div>`;
+
+  modal.classList.remove("hidden");
+
+  await loadPlaylists();
+
+  if (!state.playlists.length) {
+    list.innerHTML =
+      `<div class="empty">${escapeHTML(t("profCreatePlaylistFirst"))}</div>`;
+    return;
+  }
+
+  list.innerHTML =
+    state.playlists.map(playlist => `
+      <button
+        class="library-item"
+        data-add-playlist-id="${playlist.id}"
+      >
+        <div class="library-icon">
+          ${ICONS.plus}
+        </div>
+
+        <div class="library-info">
+          <div class="library-name">
+            ${escapeHTML(playlist.name)}
+          </div>
+
+          <div class="library-meta">
+            ${escapeHTML(t("profSongsCount")(playlist.song_count || 0))}
+          </div>
+        </div>
+      </button>
+    `).join("");
+
+  list.querySelectorAll("[data-add-playlist-id]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const playlistId = Number(button.dataset.addPlaylistId);
+
+      if (button.disabled) return;
+
+      button.disabled = true;
+
+      try {
+        const data =
+          await api(
+            `/profile/${encodeURIComponent(telegramId)}/songs/${song.id}/add-to-playlist`,
+            {
+              method: "POST",
+              body: JSON.stringify({ playlist_id: playlistId })
+            }
+          );
+
+        modal.classList.add("hidden");
+
+        const name = data.playlist?.name || "";
+
+        showToast(
+          data.already_in_playlist
+            ? t("profAlreadyIn")(name)
+            : t("profAddedTo")(name)
+        );
+
+        await loadPlaylists();
+
+        // A new copy now lives in the visitor's own library.
+        if (data.added) await loadSongs();
+      } catch (error) {
+        console.error("Profile add to playlist:", error);
+
+        button.disabled = false;
+
+        if (token === profileState.requestToken) {
+          showToast(t("profAddFailed"));
+        }
+      }
+    });
+  });
 }

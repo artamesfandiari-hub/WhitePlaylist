@@ -48,7 +48,7 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20261002-6">
+  <link rel="stylesheet" href="style.css?v=20261003-7">
 </head>
 
 <body>
@@ -778,6 +778,38 @@
       </div>
     </div>
 
+    <!-- PROFILE SONG MENU (someone else's song: a single option) -->
+    <div
+      class="modal hidden"
+      id="profileSongMenuModal"
+    >
+      <div class="modal-card">
+        <h2 id="profileSongMenuTitle" data-i18n="songWord">Song</h2>
+
+        <div class="library-list">
+          <button class="library-item" id="profileSongMenuAdd">
+            <div class="library-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </div>
+            <div class="library-info">
+              <div class="library-name" data-i18n="profAddToMyPlaylist">Add to my playlist</div>
+            </div>
+          </button>
+        </div>
+
+        <button
+          class="secondary-button full-button"
+          id="profileSongMenuClose"
+          data-i18n="closeWord"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+
     <!-- CONFIRMATION MODAL -->
     <div
       class="modal hidden"
@@ -1225,7 +1257,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20261002-5"></script>
+  <script src="app.js?v=20261003-7"></script>
 
 </body>
 </html>

@@ -2494,3 +2494,40 @@ input:focus-visible {
   inset: 0;
   background: linear-gradient(180deg, transparent 35%, var(--bg) 135%);
 }
+
+/* Like button + count on profile songs */
+.profile-song-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.profile-like-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-like-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .12s ease;
+}
+
+.profile-like-btn:active svg { transform: scale(.85); }
+.profile-like-btn.liked { color: #ff4d6a; }
+.profile-like-btn.liked svg { fill: currentColor; }
+.profile-like-count { font-variant-numeric: tabular-nums; }
+.profile-like-count:empty { display: none; }
