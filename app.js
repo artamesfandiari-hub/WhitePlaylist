@@ -423,10 +423,9 @@ const I18N = {
     profLike: "Like",
     profUnlike: "Remove like",
     profLikeFailed: "Couldn't update the like. Try again.",
-    profAddToMyPlaylist: "Add to my playlist",
-    profCreatePlaylistFirst: "Create a playlist first.",
-    profAddedTo: name => `Added to ${name}`,
-    profAlreadyIn: name => `Already in ${name}`,
+    profAddToLibrary: "Add to Library",
+    profAddedToLibrary: "Added to your library",
+    profAlreadyInLibrary: "Already in your library",
     profAddFailed: "Couldn't add the song. Try again.",
     profLoading: "Loading...",
     profNotFound: "This profile doesn't exist.",
@@ -608,10 +607,9 @@ const I18N = {
     profLike: "پسندیدن",
     profUnlike: "برداشتن پسند",
     profLikeFailed: "لایک ثبت نشد. دوباره امتحان کن.",
-    profAddToMyPlaylist: "افزودن به پلی‌لیست من",
-    profCreatePlaylistFirst: "اول یه پلی‌لیست بساز.",
-    profAddedTo: name => `به ${name} اضافه شد`,
-    profAlreadyIn: name => `از قبل توی ${name} هست`,
+    profAddToLibrary: "افزودن به کتابخانه",
+    profAddedToLibrary: "به کتابخانه‌ات اضافه شد",
+    profAlreadyInLibrary: "از قبل توی کتابخانه‌ات هست",
     profAddFailed: "آهنگ اضافه نشد. دوباره امتحان کن.",
     profLoading: "در حال بارگذاری...",
     profNotFound: "این پروفایل وجود نداره.",
@@ -3232,9 +3230,19 @@ function setupPlayer() {
   document
     .getElementById("miniPlayer")
     .addEventListener("click", event => {
+      const path =
+        typeof event.composedPath === "function"
+          ? event.composedPath()
+          : [];
+
       if (
         event.target.closest("#miniPlay") ||
-        event.target.closest("#miniLike")
+        event.target.closest("#miniLike") ||
+        path.some(
+          node =>
+            node?.id === "miniPlay" ||
+            node?.id === "miniLike"
+        )
       ) {
         return;
       }
@@ -3248,7 +3256,9 @@ function setupPlayer() {
 
   document
     .getElementById("miniLike")
-    .addEventListener("click", () => {
+    .addEventListener("click", event => {
+      event.stopPropagation();
+
       if (state.currentSong?.profileCtx) {
         likeProfileSong(state.currentSong);
       } else if (state.currentSong) {
@@ -4220,11 +4230,28 @@ function highlightPlayingRow() {
 
   if (!state.currentSong) return;
 
+  // A song started from a profile is marked only on that profile's
+  // page; a song started from the library is marked only in the
+  // library's own lists. Same song id in both places (the owner's own
+  // profile) must not light up both.
+  const ctx = state.currentSong.profileCtx;
+
   document
     .querySelectorAll(
       `.song-item[data-song-id="${state.currentSong.id}"]`
     )
-    .forEach(el => el.classList.add("playing"));
+    .forEach(el => {
+      const inProfile = !!el.closest("#profileView");
+
+      const belongs =
+        ctx
+          ? inProfile &&
+            String(ctx.telegramId) ===
+              String(profileState.telegramId)
+          : !inProfile;
+
+      if (belongs) el.classList.add("playing");
+    });
 }
 
 function openFullPlayer() {
@@ -6830,7 +6857,7 @@ function setupProfile() {
 
       closeProfileSongMenu();
 
-      if (song) openProfileAddToPlaylist(song);
+      if (song) addProfileSongToLibrary(song);
     });
 
   document
@@ -8010,92 +8037,32 @@ function closeProfileSongMenu() {
     ?.classList.add("hidden");
 }
 
-// Same playlist picker the rest of the app uses, but the song is
-// added through the profile endpoint (the song belongs to someone
-// else, so the server copies it into the visitor's library first).
-async function openProfileAddToPlaylist(song) {
-  const modal = document.getElementById("addToPlaylistModal");
-  const list = document.getElementById("addPlaylistList");
-
-  if (!modal || !list) return;
-
+// One tap: copies the song into the visitor's own library (the
+// server reuses a copy they already have), then refreshes their
+// library so it shows up in Songs straight away.
+async function addProfileSongToLibrary(song) {
   const telegramId =
     song.profileCtx?.telegramId || profileState.telegramId;
 
-  list.innerHTML =
-    `<div class="loading">${escapeHTML(t("profLoading"))}</div>`;
+  try {
+    const data =
+      await api(
+        `/profile/${encodeURIComponent(telegramId)}/songs/${song.id}/add-to-library`,
+        { method: "POST", body: JSON.stringify({}) }
+      );
 
-  modal.classList.remove("hidden");
+    showToast(
+      t(
+        data.already_in_library
+          ? "profAlreadyInLibrary"
+          : "profAddedToLibrary"
+      )
+    );
 
-  await loadPlaylists();
+    if (data.added) await loadSongs();
+  } catch (error) {
+    console.error("Profile add to library:", error);
 
-  if (!state.playlists.length) {
-    list.innerHTML =
-      `<div class="empty">${escapeHTML(t("profCreatePlaylistFirst"))}</div>`;
-    return;
+    showToast(t("profAddFailed"));
   }
-
-  list.innerHTML =
-    state.playlists.map(playlist => `
-      <button
-        class="library-item"
-        data-add-playlist-id="${playlist.id}"
-      >
-        <div class="library-icon">
-          ${ICONS.plus}
-        </div>
-
-        <div class="library-info">
-          <div class="library-name">
-            ${escapeHTML(playlist.name)}
-          </div>
-
-          <div class="library-meta">
-            ${escapeHTML(t("profSongsCount")(playlist.song_count || 0))}
-          </div>
-        </div>
-      </button>
-    `).join("");
-
-  list.querySelectorAll("[data-add-playlist-id]").forEach(button => {
-    button.addEventListener("click", async () => {
-      const playlistId = Number(button.dataset.addPlaylistId);
-
-      if (button.disabled) return;
-
-      button.disabled = true;
-
-      try {
-        const data =
-          await api(
-            `/profile/${encodeURIComponent(telegramId)}/songs/${song.id}/add-to-playlist`,
-            {
-              method: "POST",
-              body: JSON.stringify({ playlist_id: playlistId })
-            }
-          );
-
-        modal.classList.add("hidden");
-
-        const name = data.playlist?.name || "";
-
-        showToast(
-          data.already_in_playlist
-            ? t("profAlreadyIn")(name)
-            : t("profAddedTo")(name)
-        );
-
-        await loadPlaylists();
-
-        // A new copy now lives in the visitor's own library.
-        if (data.added) await loadSongs();
-      } catch (error) {
-        console.error("Profile add to playlist:", error);
-
-        button.disabled = false;
-
-        showToast(t("profAddFailed"));
-      }
-    });
-  });
 }
