@@ -3249,7 +3249,9 @@ function setupPlayer() {
   document
     .getElementById("miniLike")
     .addEventListener("click", () => {
-      if (state.currentSong) {
+      if (state.currentSong?.profileCtx) {
+        likeProfileSong(state.currentSong);
+      } else if (state.currentSong) {
         toggleFavorite(state.currentSong);
       }
     });
@@ -3261,9 +3263,19 @@ function setupPlayer() {
   document
     .getElementById("playerMenuButton")
     .addEventListener("click", () => {
-      if (state.currentSong) {
-        openSongActionsMenu(state.currentSong, { type: "player" });
+      const song = state.currentSong;
+
+      if (!song) return;
+
+      if (song.profileCtx) {
+        // Songs from a profile never get the full edit/delete menu:
+        // visitors get the one "add to my playlist" option.
+        if (!song.profileCtx.isSelf) openProfileSongMenu(song);
+
+        return;
       }
+
+      openSongActionsMenu(song, { type: "player" });
     });
 
   document
@@ -3281,7 +3293,9 @@ function setupPlayer() {
   document
     .getElementById("playerLike")
     .addEventListener("click", () => {
-      if (state.currentSong) {
+      if (state.currentSong?.profileCtx) {
+        likeProfileSong(state.currentSong);
+      } else if (state.currentSong) {
         toggleFavorite(state.currentSong);
       }
     });
@@ -3424,6 +3438,12 @@ function startPlayback(song) {
     !audio.ended;
 
   if (sameSongStillLoaded) {
+    // Same audio, but adopt the song object it was just started
+    // from: a song can be reached from a profile (liked, limited
+    // menu) or from the user's own library (favorite, full menu),
+    // and the player must follow the one the user just used.
+    state.currentSong = song;
+
     if (audio.paused) {
       audio.play().catch(error => {
         console.error("Playback:", error);
@@ -4112,15 +4132,46 @@ function updatePlayerUI() {
 function updatePlayerLike() {
   if (!state.currentSong) return;
 
+  // A song opened from someone's profile is LIKED (red heart, counted
+  // on the server). Every other song keeps the app's normal Favorite.
+  const likeMode = !!state.currentSong.profileCtx;
+
   const liked =
-    state.favorites.some(
-      item =>
-        Number(item.id) ===
-        Number(state.currentSong.id)
-    );
+    likeMode
+      ? !!state.currentSong.liked
+      : state.favorites.some(
+          item =>
+            Number(item.id) ===
+            Number(state.currentSong.id)
+        );
 
   const miniLike = document.getElementById("miniLike");
   const playerLike = document.getElementById("playerLike");
+
+  [miniLike, playerLike].forEach(button => {
+    button.classList.toggle("like-mode", likeMode);
+
+    button.setAttribute(
+      "aria-label",
+      likeMode
+        ? t(liked ? "profUnlike" : "profLike")
+        : t("favoriteWord")
+    );
+  });
+
+  // The owner manages songs from their own playlist pages, so a
+  // profile song they are playing gets no ⋯ button and no Up Next
+  // button in the full player.
+  const ownerProfileSong =
+    !!state.currentSong.profileCtx?.isSelf;
+
+  ["playerMenuButton", "playerQueueButton"].forEach(id => {
+    const button = document.getElementById(id);
+
+    if (button) {
+      button.style.visibility = ownerProfileSong ? "hidden" : "";
+    }
+  });
 
   miniLike.innerHTML =
     liked ? ICONS.heartFilled : ICONS.heart;
@@ -7230,6 +7281,8 @@ async function loadProfileSongs(reset) {
 
     const batch = data.songs || [];
 
+    tagProfileSongs(batch);
+
     profileState.songs =
       reset ? batch : profileState.songs.concat(batch);
 
@@ -7366,7 +7419,7 @@ async function openProfilePlaylist(playlistId) {
       return;
     }
 
-    const songs = data.songs || [];
+    const songs = tagProfileSongs(data.songs || []);
 
     profileState.openPlaylist = data.playlist;
     profileState.playlistSongs = songs;
@@ -7450,7 +7503,7 @@ async function loadProfileFavorites() {
 
     if (token !== profileState.requestToken) return;
 
-    profileState.favorites = data.favorites || [];
+    profileState.favorites = tagProfileSongs(data.favorites || []);
   } catch (error) {
     if (token !== profileState.requestToken) return;
 
@@ -7793,88 +7846,121 @@ function findProfileSong(songId) {
   return null;
 }
 
-// Writes a song's like state into every loaded copy of it (the
-// All songs / Favorites / open-playlist lists) and into every button
-// currently on screen, so the heart and the count always agree.
-function applyProfileLike(songId, liked, count) {
+// Songs remember which profile they came from, so the player can
+// keep liking them after the profile page has been left or replaced.
+function tagProfileSongs(list) {
+  const ctx = {
+    telegramId: profileState.telegramId,
+    isSelf: profileState.isSelf
+  };
+
+  (list || []).forEach(song => {
+    song.profileCtx = ctx;
+  });
+
+  return list;
+}
+
+// Writes a song's like state into every copy of it the app holds (the
+// profile lists, the play queue, the song that is playing) and into
+// every button on screen, so every heart and count always agree.
+function applyProfileLike(telegramId, songId, liked, count) {
+  const same = song =>
+    Number(song.id) === Number(songId) &&
+    String(song.profileCtx?.telegramId) === String(telegramId);
+
   [
     profileState.songs,
     profileState.favorites || [],
-    profileState.playlistSongs || []
+    profileState.playlistSongs || [],
+    state.queue || [],
+    state.currentSong ? [state.currentSong] : []
   ].forEach(list => {
     list.forEach(song => {
-      if (Number(song.id) === Number(songId)) {
+      if (same(song)) {
         song.liked = liked;
         song.like_count = count;
       }
     });
   });
 
-  document
-    .querySelectorAll(`[data-profile-like="${Number(songId)}"]`)
-    .forEach(button => {
-      button.classList.toggle("liked", liked);
-      button.setAttribute("aria-pressed", liked ? "true" : "false");
-      button.setAttribute(
-        "aria-label",
-        t(liked ? "profUnlike" : "profLike")
-      );
+  if (String(profileState.telegramId) === String(telegramId)) {
+    document
+      .querySelectorAll(`[data-profile-like="${Number(songId)}"]`)
+      .forEach(button => {
+        button.classList.toggle("liked", liked);
+        button.setAttribute("aria-pressed", liked ? "true" : "false");
+        button.setAttribute(
+          "aria-label",
+          t(liked ? "profUnlike" : "profLike")
+        );
 
-      const label = button.querySelector(".profile-like-count");
+        const label = button.querySelector(".profile-like-count");
 
-      if (label) {
-        label.textContent =
-          count > 0 ? formatLikeCount(count) : "";
-      }
-    });
+        if (label) {
+          label.textContent =
+            count > 0 ? formatLikeCount(count) : "";
+        }
+      });
+  }
+
+  updatePlayerLike();
 }
 
-async function toggleProfileLike(songId) {
-  if (profileState.likePending.has(songId)) return;
+async function likeProfileSong(song) {
+  const ctx = song?.profileCtx;
 
-  const song = findProfileSong(songId);
+  if (!ctx) return;
 
-  if (!song) return;
+  const key = `${ctx.telegramId}:${song.id}`;
 
-  const token = profileState.requestToken;
-  const telegramId = profileState.telegramId;
+  if (profileState.likePending.has(key)) return;
+
   const wasLiked = !!song.liked;
   const wasCount = Number(song.like_count) || 0;
   const nextLiked = !wasLiked;
 
   // Optimistic update; the server's answer replaces it below.
   applyProfileLike(
-    songId,
+    ctx.telegramId,
+    song.id,
     nextLiked,
     Math.max(0, wasCount + (nextLiked ? 1 : -1))
   );
 
-  profileState.likePending.add(songId);
+  profileState.likePending.add(key);
 
   try {
     const data =
       await api(
-        `/profile/${encodeURIComponent(telegramId)}/songs/${songId}/like`,
+        `/profile/${encodeURIComponent(ctx.telegramId)}/songs/${song.id}/like`,
         {
           method: "PUT",
           body: JSON.stringify({ liked: nextLiked })
         }
       );
 
-    if (token === profileState.requestToken) {
-      applyProfileLike(songId, !!data.liked, Number(data.like_count) || 0);
-    }
+    applyProfileLike(
+      ctx.telegramId,
+      song.id,
+      !!data.liked,
+      Number(data.like_count) || 0
+    );
   } catch (error) {
     console.error("Profile like:", error);
 
-    if (token === profileState.requestToken) {
-      applyProfileLike(songId, wasLiked, wasCount);
-    }
+    applyProfileLike(ctx.telegramId, song.id, wasLiked, wasCount);
 
     showToast(t("profLikeFailed"));
   } finally {
-    profileState.likePending.delete(songId);
+    profileState.likePending.delete(key);
   }
+}
+
+function toggleProfileLike(songId) {
+  const song = findProfileSong(songId);
+
+  if (song) likeProfileSong(song);
 }
 
 function bindProfileSongActions(container, list) {
@@ -7933,8 +8019,8 @@ async function openProfileAddToPlaylist(song) {
 
   if (!modal || !list) return;
 
-  const token = profileState.requestToken;
-  const telegramId = profileState.telegramId;
+  const telegramId =
+    song.profileCtx?.telegramId || profileState.telegramId;
 
   list.innerHTML =
     `<div class="loading">${escapeHTML(t("profLoading"))}</div>`;
@@ -8008,9 +8094,7 @@ async function openProfileAddToPlaylist(song) {
 
         button.disabled = false;
 
-        if (token === profileState.requestToken) {
-          showToast(t("profAddFailed"));
-        }
+        showToast(t("profAddFailed"));
       }
     });
   });

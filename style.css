@@ -2531,3 +2531,15 @@ input:focus-visible {
 .profile-like-btn.liked svg { fill: currentColor; }
 .profile-like-count { font-variant-numeric: tabular-nums; }
 .profile-like-count:empty { display: none; }
+
+/* Player hearts for a song opened from a profile: a red Like */
+#playerLike.like-mode.active,
+.mini-like.like-mode.active {
+  color: #ff4d6a !important;
+}
+
+#playerLike.like-mode.active svg,
+.mini-like.like-mode.active svg {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
