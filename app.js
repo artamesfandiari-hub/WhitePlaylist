@@ -353,7 +353,11 @@ async function api(endpoint, options = {}) {
 
   // Profile endpoints authenticate with Telegram's signed initData
   // (verified server-side), not the plain user-id header above.
-  if (endpoint.startsWith("/profile") && tg?.initData) {
+  if (
+    (endpoint.startsWith("/profile") ||
+      endpoint.startsWith("/users/")) &&
+    tg?.initData
+  ) {
     headers["X-Telegram-Init-Data"] = tg.initData;
   }
 
@@ -420,6 +424,8 @@ async function api(endpoint, options = {}) {
 const I18N = {
   en: {
     profAria: "Profile",
+    searchPeople: "People",
+    searchSongsTitle: "Songs",
     profLike: "Like",
     profUnlike: "Remove like",
     profLikeFailed: "Couldn't update the like. Try again.",
@@ -460,7 +466,7 @@ const I18N = {
     subtitle: "Your music library",
     ariaSearch: "Search",
     ariaTheme: "Switch between light and dark theme",
-    searchPlaceholder: "Search songs, artists or albums...",
+    searchPlaceholder: "Search songs, artists, albums or @username...",
     homeSubtitle: "Here is your music.",
     smartMixLabel: "✨ Smart Mix",
     madeForYou: "Made for you",
@@ -604,6 +610,8 @@ const I18N = {
   },
   fa: {
     profAria: "پروفایل",
+    searchPeople: "افراد",
+    searchSongsTitle: "آهنگ‌ها",
     profLike: "پسندیدن",
     profUnlike: "برداشتن پسند",
     profLikeFailed: "لایک ثبت نشد. دوباره امتحان کن.",
@@ -644,7 +652,7 @@ const I18N = {
     subtitle: "کتابخونه‌ی موزیک تو",
     ariaSearch: "جستجو",
     ariaTheme: "تغییر بین تم روشن و تیره",
-    searchPlaceholder: "جستجوی آهنگ، هنرمند یا آلبوم...",
+    searchPlaceholder: "جستجوی آهنگ، هنرمند، آلبوم یا @یوزرنیم...",
     homeSubtitle: "بیا موزیکاتو ببین.",
     smartMixLabel: "✨ میکس هوشمند",
     madeForYou: "مخصوص خودت",
@@ -879,6 +887,7 @@ async function init() {
   setupSmartMix();
   setupSharePlaylist();
   setupProfile();
+  setupCarouselSwipeGuard();
 
   renderHomeGreeting();
 
@@ -3921,16 +3930,104 @@ function removeFromQueue(index) {
 
 let queueDrag = null;
 
+// Telegram's swipe-down-to-close/minimize gesture is switched off
+// while ANY part of the app needs it off (a queue drag, a finger on a
+// horizontal carousel) and only switched back on when the last one is
+// done, so two features can't turn it back on underneath each other.
+// Telegram Bot API 7.7+; older clients (or outside Telegram) skip it.
+const verticalSwipeHolds = new Set();
+
+function holdVerticalSwipes(owner, hold) {
+  if (hold) verticalSwipeHolds.add(owner);
+  else verticalSwipeHolds.delete(owner);
+
+  if (!tg) return;
+
+  try {
+    if (verticalSwipeHolds.size) tg.disableVerticalSwipes?.();
+    else tg.enableVerticalSwipes?.();
+  } catch (_) {}
+}
+
 function setQueueDragModeActive(active) {
   document.getElementById("queueList")?.classList.toggle("is-dragging", active);
 
-  // Telegram Bot API 7.7+. Wrapped so older clients (or running
-  // outside Telegram entirely) just silently skip this.
-  if (!tg) return;
-  try {
-    if (active) tg.disableVerticalSwipes?.();
-    else tg.enableVerticalSwipes?.();
-  } catch (_) {}
+  holdVerticalSwipes("queue", active);
+}
+
+/* ---------- Horizontal carousels vs. swipe-down-to-close ----------
+   Dragging sideways on a carousel (Recently Played, Top Artists, ...)
+   while the page is scrolled to the top is read by Telegram as the
+   start of "pull the app down", and the whole app slides away. The
+   gesture is switched off for as long as a finger is on anything
+   that scrolls sideways, and back on right after it lifts, so
+   swiping down to close still works everywhere else. */
+
+function isHorizontalScroller(el) {
+  const overflowX = getComputedStyle(el).overflowX;
+
+  return (
+    (overflowX === "auto" || overflowX === "scroll") &&
+    el.scrollWidth > el.clientWidth + 1
+  );
+}
+
+function setupCarouselSwipeGuard() {
+  let releaseTimer = null;
+  let watchdog = null;
+
+  const release = () => {
+    clearTimeout(releaseTimer);
+
+    // A short delay so the tail of a fling can't re-arm the gesture.
+    releaseTimer = setTimeout(() => {
+      clearTimeout(watchdog);
+      holdVerticalSwipes("carousel", false);
+    }, 250);
+  };
+
+  document.addEventListener(
+    "touchstart",
+    event => {
+      let el =
+        event.target instanceof Element ? event.target : null;
+
+      while (el && el !== document.body) {
+        if (isHorizontalScroller(el)) {
+          clearTimeout(releaseTimer);
+          clearTimeout(watchdog);
+
+          holdVerticalSwipes("carousel", true);
+
+          // Never leave the gesture off if a touchend gets lost.
+          watchdog = setTimeout(
+            () => holdVerticalSwipes("carousel", false),
+            15000
+          );
+
+          return;
+        }
+
+        el = el.parentElement;
+      }
+    },
+    { passive: true, capture: true }
+  );
+
+  ["touchend", "touchcancel"].forEach(name => {
+    document.addEventListener(name, release, {
+      passive: true,
+      capture: true
+    });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") {
+      clearTimeout(releaseTimer);
+      clearTimeout(watchdog);
+      holdVerticalSwipes("carousel", false);
+    }
+  });
 }
 
 function setupQueueDragging() {
@@ -6579,37 +6676,125 @@ function setupSearch() {
   });
 }
 
+let searchToken = 0;
+
+// People whose Telegram username starts with the query (see
+// searchUsers in the Worker for what is and isn't findable).
+async function searchPeople(q) {
+  const handle = q.replace(/^@+/, "");
+
+  if (handle.length < 2) return [];
+
+  const data =
+    await api(`/users/search?q=${encodeURIComponent(handle)}`);
+
+  return data.users || [];
+}
+
+function peopleRowHTML(person) {
+  return `
+    <button
+      type="button"
+      class="people-row"
+      data-user="${escapeHTML(String(person.telegram_id))}"
+    >
+      <div class="people-avatar">${escapeHTML(profileInitial(person.name))}</div>
+
+      <div class="people-info">
+        <div class="people-name" dir="auto">${escapeHTML(person.name)}</div>
+        <div class="people-username" dir="ltr">@${escapeHTML(person.username)}</div>
+      </div>
+
+      ${
+        person.is_private
+          ? `<span class="people-lock" aria-label="${escapeHTML(t("profPrivate"))}">${PROFILE_ICONS.lock}</span>`
+          : ""
+      }
+    </button>`;
+}
+
 async function search(query) {
   const q = query.trim();
+  const token = ++searchToken;
 
   if (!q) {
     showPage("homePage");
     return;
   }
 
-  try {
-    const data =
-      await api(`/search?q=${encodeURIComponent(q)}`);
+  const [songsResult, peopleResult] =
+    await Promise.allSettled([
+      api(`/search?q=${encodeURIComponent(q)}`),
+      searchPeople(q)
+    ]);
 
-    const results = data.songs || [];
+  // A newer search was typed while this one was loading.
+  if (token !== searchToken) return;
 
-    const container =
-      document.getElementById("searchResults");
-
-    if (!results.length) {
-      container.innerHTML =
-        `<div class="empty">No results found.</div>`;
-    } else {
-      container.innerHTML =
-        results.map(songHTML).join("");
-
-      bindSongButtons(container, results);
-    }
-
-    showPage("searchPage");
-  } catch (error) {
-    console.error("Search:", error);
+  if (songsResult.status === "rejected") {
+    console.error("Search:", songsResult.reason);
   }
+
+  if (peopleResult.status === "rejected") {
+    console.error("Search people:", peopleResult.reason);
+  }
+
+  const songs =
+    songsResult.status === "fulfilled"
+      ? songsResult.value.songs || []
+      : [];
+
+  const people =
+    peopleResult.status === "fulfilled"
+      ? peopleResult.value
+      : [];
+
+  // Nothing could be loaded at all: keep whatever is on screen.
+  if (
+    songsResult.status === "rejected" &&
+    peopleResult.status === "rejected"
+  ) {
+    return;
+  }
+
+  const container =
+    document.getElementById("searchResults");
+
+  if (!songs.length && !people.length) {
+    container.innerHTML =
+      `<div class="empty">No results found.</div>`;
+    showPage("searchPage");
+    return;
+  }
+
+  const both = songs.length && people.length;
+
+  container.innerHTML =
+    (people.length
+      ? `${both ? `<h3 class="search-group-title">${escapeHTML(t("searchPeople"))}</h3>` : ""}
+         <div class="people-list" id="searchPeopleList">
+           ${people.map(peopleRowHTML).join("")}
+         </div>`
+      : "") +
+    (songs.length
+      ? `${both ? `<h3 class="search-group-title">${escapeHTML(t("searchSongsTitle"))}</h3>` : ""}
+         <div id="searchSongList">${songs.map(songHTML).join("")}</div>`
+      : "");
+
+  container
+    .querySelectorAll(".people-row")
+    .forEach(row => {
+      row.addEventListener("click", () =>
+        openProfile(row.dataset.user)
+      );
+    });
+
+  const songList =
+    document.getElementById("searchSongList");
+
+  if (songList) bindSongButtons(songList, songs);
+
+  showPage("searchPage");
 }
 
 /* =========================================================
