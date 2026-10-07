@@ -424,8 +424,12 @@ async function api(endpoint, options = {}) {
 const I18N = {
   en: {
     profAria: "Profile",
-    searchPeople: "People",
-    searchSongsTitle: "Songs",
+    peopleAria: "Find people",
+    peopleTitle: "People",
+    peoplePlaceholder: "Search by @username",
+    peopleHint: "Type at least 2 letters of a username.",
+    peopleNone: "No one found with that username.",
+    peopleFailed: "Couldn't search. Try again.",
     profLike: "Like",
     profUnlike: "Remove like",
     profLikeFailed: "Couldn't update the like. Try again.",
@@ -466,7 +470,7 @@ const I18N = {
     subtitle: "Your music library",
     ariaSearch: "Search",
     ariaTheme: "Switch between light and dark theme",
-    searchPlaceholder: "Search songs, artists, albums or @username...",
+    searchPlaceholder: "Search songs, artists or albums...",
     homeSubtitle: "Here is your music.",
     smartMixLabel: "✨ Smart Mix",
     madeForYou: "Made for you",
@@ -610,8 +614,12 @@ const I18N = {
   },
   fa: {
     profAria: "پروفایل",
-    searchPeople: "افراد",
-    searchSongsTitle: "آهنگ‌ها",
+    peopleAria: "پیدا کردن افراد",
+    peopleTitle: "افراد",
+    peoplePlaceholder: "جستجو با @یوزرنیم",
+    peopleHint: "حداقل ۲ حرف از یوزرنیم رو بنویس.",
+    peopleNone: "کسی با این یوزرنیم پیدا نشد.",
+    peopleFailed: "جستجو انجام نشد. دوباره امتحان کن.",
     profLike: "پسندیدن",
     profUnlike: "برداشتن پسند",
     profLikeFailed: "لایک ثبت نشد. دوباره امتحان کن.",
@@ -652,7 +660,7 @@ const I18N = {
     subtitle: "کتابخونه‌ی موزیک تو",
     ariaSearch: "جستجو",
     ariaTheme: "تغییر بین تم روشن و تیره",
-    searchPlaceholder: "جستجوی آهنگ، هنرمند، آلبوم یا @یوزرنیم...",
+    searchPlaceholder: "جستجوی آهنگ، هنرمند یا آلبوم...",
     homeSubtitle: "بیا موزیکاتو ببین.",
     smartMixLabel: "✨ میکس هوشمند",
     madeForYou: "مخصوص خودت",
@@ -867,7 +875,15 @@ function setupTheme() {
    INIT
    ========================================================= */
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+  // Never keep the splash up longer than ~4s, even on a slow network:
+  // whatever has loaded by then is shown and the rest fills in.
+  setTimeout(markAppReady, 4000);
+
+  init()
+    .catch(error => console.error("Init:", error))
+    .finally(markAppReady);
+});
 
 async function init() {
   // Must happen before anything below renders any text, so the
@@ -887,6 +903,7 @@ async function init() {
   setupSmartMix();
   setupSharePlaylist();
   setupProfile();
+  setupPeople();
   setupCarouselSwipeGuard();
 
   renderHomeGreeting();
@@ -908,6 +925,8 @@ async function init() {
 
   renderRecentSongs();
   renderHomeDashboard();
+
+  markAppReady();
 }
 
 /* =========================================================
@@ -6722,79 +6741,140 @@ async function search(query) {
     return;
   }
 
-  const [songsResult, peopleResult] =
-    await Promise.allSettled([
-      api(`/search?q=${encodeURIComponent(q)}`),
-      searchPeople(q)
-    ]);
+  try {
+    const data =
+      await api(`/search?q=${encodeURIComponent(q)}`);
 
-  // A newer search was typed while this one was loading.
-  if (token !== searchToken) return;
+    // A newer search was typed while this one was loading.
+    if (token !== searchToken) return;
 
-  if (songsResult.status === "rejected") {
-    console.error("Search:", songsResult.reason);
-  }
+    const results = data.songs || [];
 
-  if (peopleResult.status === "rejected") {
-    console.error("Search people:", peopleResult.reason);
-  }
+    const container =
+      document.getElementById("searchResults");
 
-  const songs =
-    songsResult.status === "fulfilled"
-      ? songsResult.value.songs || []
-      : [];
+    if (!results.length) {
+      container.innerHTML =
+        `<div class="empty">No results found.</div>`;
+      showPage("searchPage");
+      return;
+    }
 
-  const people =
-    peopleResult.status === "fulfilled"
-      ? peopleResult.value
-      : [];
+    container.innerHTML = results.map(songHTML).join("");
 
-  // Nothing could be loaded at all: keep whatever is on screen.
-  if (
-    songsResult.status === "rejected" &&
-    peopleResult.status === "rejected"
-  ) {
-    return;
-  }
+    bindSongButtons(container, results);
 
-  const container =
-    document.getElementById("searchResults");
-
-  if (!songs.length && !people.length) {
-    container.innerHTML =
-      `<div class="empty">No results found.</div>`;
     showPage("searchPage");
+  } catch (error) {
+    console.error("Search:", error);
+  }
+}
+
+/* =========================================================
+   PEOPLE PAGE (find users by Telegram username)
+   ========================================================= */
+
+let peopleToken = 0;
+let peopleTimer = null;
+
+function setupPeople() {
+  const button = document.getElementById("peopleButton");
+  const input = document.getElementById("peopleInput");
+
+  if (!button || !input) return;
+
+  button.addEventListener("click", () => {
+    showPage("peoplePage");
+    input.focus();
+  });
+
+  input.addEventListener("input", () => {
+    clearTimeout(peopleTimer);
+
+    peopleTimer = setTimeout(
+      () => runPeopleSearch(input.value),
+      300
+    );
+  });
+}
+
+async function runPeopleSearch(query) {
+  const results = document.getElementById("peopleResults");
+  const token = ++peopleToken;
+  const handle = query.trim().replace(/^@+/, "");
+
+  if (handle.length < 2) {
+    results.innerHTML =
+      `<div class="empty">${escapeHTML(t("peopleHint"))}</div>`;
     return;
   }
 
-  const both = songs.length && people.length;
+  try {
+    const people = await searchPeople(handle);
 
-  container.innerHTML =
-    (people.length
-      ? `${both ? `<h3 class="search-group-title">${escapeHTML(t("searchPeople"))}</h3>` : ""}
-         <div class="people-list" id="searchPeopleList">
-           ${people.map(peopleRowHTML).join("")}
-         </div>`
-      : "") +
-    (songs.length
-      ? `${both ? `<h3 class="search-group-title">${escapeHTML(t("searchSongsTitle"))}</h3>` : ""}
-         <div id="searchSongList">${songs.map(songHTML).join("")}</div>`
-      : "");
+    // A newer search was typed while this one was loading.
+    if (token !== peopleToken) return;
 
-  container
-    .querySelectorAll(".people-row")
-    .forEach(row => {
+    if (!people.length) {
+      results.innerHTML =
+        `<div class="empty">${escapeHTML(t("peopleNone"))}</div>`;
+      return;
+    }
+
+    results.innerHTML =
+      `<div class="people-list">${people.map(peopleRowHTML).join("")}</div>`;
+
+    results.querySelectorAll(".people-row").forEach(row => {
       row.addEventListener("click", () =>
         openProfile(row.dataset.user)
       );
     });
 
-  const songList =
-    document.getElementById("searchSongList");
+    loadPeopleAvatars(results, people, token);
+  } catch (error) {
+    console.error("People search:", error);
 
-  if (songList) bindSongButtons(songList, songs);
+    if (token === peopleToken) {
+      results.innerHTML =
+        `<div class="empty">${escapeHTML(t("peopleFailed"))}</div>`;
+    }
+  }
+}
 
-  showPage("searchPage");
+// Rows appear at once with the first letter; the Telegram photos
+// are fetched a few at a time and swapped in as they arrive. Private
+// profiles never get a photo (same rule as their profile page). The
+// "version" is a 5-minute bucket, so a changed photo shows up on the
+// next search after that, matching how long the server caches it.
+async function loadPeopleAvatars(container, people, token) {
+  const bucket = `s${Math.floor(Date.now() / 300000)}`;
+
+  const queue =
+    people.filter(person => !person.is_private);
+
+  const worker = async () => {
+    while (queue.length) {
+      const person = queue.shift();
+
+      if (token !== peopleToken) return;
+
+      const result =
+        await fetchProfileAvatarUrl(person.telegram_id, bucket);
+
+      if (!result.url || token !== peopleToken) continue;
+
+      const row =
+        container.querySelector(
+          `.people-row[data-user="${CSS.escape(String(person.telegram_id))}"] .people-avatar`
+        );
+
+      if (row) {
+        row.innerHTML = `<img src="${escapeHTML(result.url)}" alt="">`;
+      }
+    }
+  };
+
+  await Promise.all([worker(), worker(), worker(), worker()]);
 }
 
 /* =========================================================
@@ -7913,8 +7993,8 @@ async function fetchProfileAvatarUrl(telegramId, version) {
 
     profileAvatarCache.set(key, url);
 
-    // Keep memory small: drop the oldest photos beyond 20.
-    if (profileAvatarCache.size > 20) {
+    // Keep memory small: drop the oldest photos beyond 80.
+    if (profileAvatarCache.size > 80) {
       const oldest = profileAvatarCache.keys().next().value;
 
       URL.revokeObjectURL(profileAvatarCache.get(oldest));
@@ -8250,4 +8330,146 @@ async function addProfileSongToLibrary(song) {
 
     showToast(t("profAddFailed"));
   }
+}
+
+
+/* =========================================================
+   LAUNCH SPLASH
+   ----------------------------------------------------------
+   The page opens on the app name in the middle of the screen
+   (CSS animation, already running before this file loads). Once
+   the app is ready AND the animation has had its time, the title
+   glides up to its place in the header, the splash dissolves and
+   the app arrives piece by piece. Tap the splash to skip the wait.
+
+   window.__SPLASH_MIN_MS can be set before this script runs:
+   0 disables the splash entirely (used by the automated tests).
+   ========================================================= */
+
+const SPLASH_SCALE = 1.45;          // must match .splash-title in style.css
+const SPLASH_MIN_MS = 2250;
+const SPLASH_GLIDE_MS = 650;
+
+let appIsReady = false;
+let splashFinished = false;
+let splashGlideStarted = false;
+let splashTimer = null;
+
+function markAppReady() {
+  appIsReady = true;
+  scheduleSplashFinish();
+}
+
+function splashMinMs() {
+  return typeof window.__SPLASH_MIN_MS === "number"
+    ? window.__SPLASH_MIN_MS
+    : SPLASH_MIN_MS;
+}
+
+function scheduleSplashFinish() {
+  if (splashFinished || splashTimer !== null || !appIsReady) return;
+
+  const splash = document.getElementById("splash");
+  const min = splashMinMs();
+
+  if (!splash || min <= 0) {
+    endSplash(false);
+    return;
+  }
+
+  const reduced =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+  const elapsed =
+    performance.now() - (window.__splashStart || 0);
+
+  splashTimer =
+    setTimeout(
+      glideSplash,
+      Math.max(0, (reduced ? 600 : min) - elapsed)
+    );
+
+  splash.addEventListener("click", () => {
+    if (!splashGlideStarted) {
+      clearTimeout(splashTimer);
+      glideSplash();
+    }
+  });
+}
+
+async function glideSplash() {
+  if (splashFinished || splashGlideStarted) return;
+
+  splashGlideStarted = true;
+
+  const title = document.getElementById("splashTitle");
+  const line = document.getElementById("splashLine");
+  const brand = document.querySelector(".topbar .brand");
+
+  const reduced =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+  if (!title || !brand || reduced || !title.animate) {
+    endSplash(true);
+    return;
+  }
+
+  try {
+    await document.fonts.ready;
+
+    // Where the real title sits, measured from the screen's centre
+    // point that the splash title is positioned around.
+    const rect = brand.getBoundingClientRect();
+
+    const dx =
+      rect.left + rect.width / 2 - window.innerWidth / 2;
+
+    const dy =
+      rect.top + rect.height / 2 - window.innerHeight * 0.46;
+
+    line?.animate(
+      [{ opacity: 0.7 }, { opacity: 0 }],
+      { duration: 300, fill: "forwards" }
+    );
+
+    await title.animate(
+      [
+        { transform: `translate(-50%, -50%) scale(${SPLASH_SCALE})` },
+        {
+          transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1)`
+        }
+      ],
+      {
+        duration: SPLASH_GLIDE_MS,
+        easing: "cubic-bezier(.65, 0, .35, 1)",
+        fill: "forwards"
+      }
+    ).finished;
+  } catch (error) {
+    // A broken animation must never trap the user behind the splash.
+  }
+
+  endSplash(true);
+}
+
+function endSplash(animated) {
+  if (splashFinished) return;
+
+  splashFinished = true;
+
+  clearTimeout(window.__splashFailsafe);
+  clearTimeout(splashTimer);
+
+  const html = document.documentElement;
+  const splash = document.getElementById("splash");
+
+  if (animated) html.classList.add("splash-reveal");
+
+  // The real title appears exactly where the splash title stopped,
+  // and the splash title/background fade away on top of the app.
+  html.classList.remove("splashing");
+  splash?.classList.add("done");
+
+  setTimeout(() => splash?.remove(), 500);
+  setTimeout(() => html.classList.remove("splash-reveal"), 1600);
 }

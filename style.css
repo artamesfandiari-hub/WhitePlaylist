@@ -1,3 +1,14 @@
+/* "WP Brand" = Poiret One by Denis Masharov, SIL Open Font License 1.1
+   (https://openfontlicense.org). Subset to the letters of the app name and
+   embedded so the title never depends on the network. */
+@font-face {
+  font-family: "WP Brand";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(data:font/woff;base64,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) format("woff");
+}
+
 /* =========================================================
    WHITE PLAYLIST — DESIGN SYSTEM
    1. Reset            6. Cards / Library
@@ -256,26 +267,31 @@ main { width: 100%; }
   top: 0;
   z-index: 20;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: calc(16px + env(safe-area-inset-top)) 18px 16px;
+  gap: 14px;
+  padding: calc(14px + env(safe-area-inset-top)) 18px 14px;
   background: var(--topbar-bg);
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   border-bottom: 1px solid var(--border);
 }
 
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-actions { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.topbar .icon-button { width: 44px; height: 44px; }
 
-.brand {
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: 3.5px;
+.brand,
+.splash-title {
+  font-family: "WP Brand", "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: .22em;
+  padding-left: .22em;          /* balances the spacing after the last letter */
   text-transform: uppercase;
-  background: var(--brand-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  font-kerning: none;           /* identical advance widths in both, so the glide lands exactly */
+  white-space: nowrap;
+  color: var(--text);
 }
 
 .subtitle {
@@ -2545,17 +2561,7 @@ input:focus-visible {
   stroke: currentColor !important;
 }
 
-/* People in search results */
-.search-group-title {
-  margin: 18px 4px 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.search-group-title:first-child { margin-top: 4px; }
+/* People */
 
 .people-list { display: flex; flex-direction: column; gap: 4px; }
 
@@ -2599,3 +2605,90 @@ input:focus-visible {
 .people-username { color: var(--text-secondary); font-size: 13px; }
 .people-lock { color: var(--text-secondary); display: inline-flex; }
 .people-lock svg { width: 18px; height: 18px; }
+
+.people-avatar { overflow: hidden; }
+.people-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+#peopleResults { margin-top: 6px; }
+
+/* =========================================================
+   LAUNCH SPLASH
+   ========================================================= */
+
+html.splashing { overflow: hidden; }
+html.splashing .topbar .brand { opacity: 0; }
+
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  transition: background-color .35s ease;
+}
+
+#splash.done { background-color: transparent; pointer-events: none; }
+#splash.done .splash-title,
+#splash.done #splashLine { opacity: 0; }
+
+.splash-title {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%) scale(1.45);
+}
+
+.splash-title span {
+  display: inline-block;
+  opacity: 0;
+  animation: splashLetter .6s var(--ease) both;
+  animation-delay: calc(.25s + var(--i) * .045s);
+  will-change: transform, opacity, filter;
+}
+
+#splashLine {
+  position: fixed;
+  left: 50%;
+  top: calc(46% + 40px);
+  width: 0;
+  height: 1px;
+  background: var(--text-secondary);
+  transform: translateX(-50%);
+  opacity: 0;
+  animation: splashLine .6s var(--ease) .9s both;
+}
+
+@keyframes splashLetter {
+  from { opacity: 0; transform: translateY(16px); filter: blur(7px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+
+@keyframes splashLine {
+  from { opacity: 0; width: 0; }
+  to   { opacity: .7; width: 170px; }
+}
+
+@keyframes splashIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* the app arrives piece by piece once the title has landed */
+html.splash-reveal .topbar .icon-button { animation: splashIn .5s var(--ease) both; }
+html.splash-reveal .topbar .icon-button:nth-child(2) { animation-delay: .06s; }
+html.splash-reveal .topbar .icon-button:nth-child(3) { animation-delay: .12s; }
+html.splash-reveal .topbar .icon-button:nth-child(4) { animation-delay: .18s; }
+html.splash-reveal #homePage > * { animation: splashIn .55s var(--ease) both; }
+html.splash-reveal #homePage > *:nth-child(1) { animation-delay: .10s; }
+html.splash-reveal #homePage > *:nth-child(2) { animation-delay: .16s; }
+html.splash-reveal #homePage > *:nth-child(3) { animation-delay: .22s; }
+html.splash-reveal #homePage > *:nth-child(4) { animation-delay: .28s; }
+html.splash-reveal #homePage > *:nth-child(5) { animation-delay: .34s; }
+html.splash-reveal #homePage > *:nth-child(n+6) { animation-delay: .40s; }
+html.splash-reveal .bottom-nav { animation: splashIn .55s var(--ease) .25s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-title span { animation: none; opacity: 1; }
+  #splashLine { animation: none; width: 170px; opacity: .7; }
+  html.splash-reveal .topbar .icon-button,
+  html.splash-reveal #homePage > *,
+  html.splash-reveal .bottom-nav { animation: none; }
+}

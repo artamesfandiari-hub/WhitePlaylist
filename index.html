@@ -35,6 +35,19 @@
     })();
   </script>
 
+  <script>
+    // Launch splash: the real header title stays hidden until the
+    // splash title has glided into its place (see glideSplash in app.js).
+    // The failsafe removes the splash if the app script never starts.
+    document.documentElement.classList.add("splashing");
+    window.__splashStart = performance.now();
+    window.__splashFailsafe = setTimeout(function () {
+      var s = document.getElementById("splash");
+      if (s) s.remove();
+      document.documentElement.classList.remove("splashing");
+    }, 8000);
+  </script>
+
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <!-- Display fonts used only for the full-player lyrics ticker
@@ -48,20 +61,23 @@
     rel="stylesheet"
   >
 
-  <link rel="stylesheet" href="style.css?v=20261006-11">
+  <link rel="stylesheet" href="style.css?v=20261007-12">
 </head>
 
 <body>
+
+  <!-- LAUNCH SPLASH -->
+  <div id="splash" aria-hidden="true">
+    <div id="splashTitle" class="splash-title"><span style="--i:0">W</span><span style="--i:1">H</span><span style="--i:2">I</span><span style="--i:3">T</span><span style="--i:4">E</span><span style="--i:5">&nbsp;</span><span style="--i:6">P</span><span style="--i:7">L</span><span style="--i:8">A</span><span style="--i:9">Y</span><span style="--i:10">L</span><span style="--i:11">I</span><span style="--i:12">S</span><span style="--i:13">T</span></div>
+    <div id="splashLine"></div>
+  </div>
 
   <div id="app">
 
     <!-- HEADER -->
     <header class="topbar">
 
-      <div>
-        <div class="brand">WHITE PLAYLIST</div>
-        <div class="subtitle" data-i18n="subtitle">Your music library</div>
-      </div>
+      <div class="brand">WHITE PLAYLIST</div>
 
       <div class="topbar-actions">
 
@@ -74,6 +90,20 @@
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="8.5" r="4"></circle>
             <path d="M4.5 20c.9-3.6 3.9-5.5 7.5-5.5s6.6 1.9 7.5 5.5"></path>
+          </svg>
+        </button>
+
+        <button
+          class="icon-button"
+          id="peopleButton"
+          aria-label="Find people"
+          data-i18n-aria="peopleAria"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="9" cy="8.5" r="3.6"></circle>
+            <path d="M2.5 19.5c.7-3.3 3.2-5 6.5-5s5.8 1.7 6.5 5"></path>
+            <path d="M15.8 4.9a3.6 3.6 0 0 1 0 7.2"></path>
+            <path d="M18 14.6c1.8.6 3 2.2 3.5 4.9"></path>
           </svg>
         </button>
 
@@ -123,7 +153,7 @@
       <input
         id="searchInput"
         type="search"
-        placeholder="Search songs, artists, albums or @username..."
+        placeholder="Search songs, artists or albums..."
     data-i18n-placeholder="searchPlaceholder"
         autocomplete="off"
       >
@@ -478,6 +508,43 @@
         </button>
 
         <div id="sharedPlaylistDetail"></div>
+      </section>
+
+      <!-- PEOPLE (find users by username) -->
+      <section
+        class="page"
+        id="peoplePage"
+      >
+        <button
+          class="back-button"
+          data-back="homePage"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polyline points="15 5 8 12 15 19"></polyline>
+          </svg>
+          <span data-i18n="homeWord">Home</span>
+        </button>
+
+        <div class="page-title-row">
+          <h1 data-i18n="peopleTitle">People</h1>
+        </div>
+
+        <label class="profile-search">
+          <input
+            id="peopleInput"
+            type="search"
+            dir="auto"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="Search by @username"
+            data-i18n-placeholder="peoplePlaceholder"
+          >
+        </label>
+
+        <div id="peopleResults">
+          <div class="empty" data-i18n="peopleHint">Type at least 2 letters of a username.</div>
+        </div>
       </section>
 
       <!-- PROFILE (own profile, or another user's via a shared link) -->
@@ -1257,7 +1324,7 @@
     crossorigin="anonymous"
   ></audio>
 
-  <script src="app.js?v=20261006-11"></script>
+  <script src="app.js?v=20261007-12"></script>
 
 </body>
 </html>
