@@ -85,6 +85,10 @@ const tg =
 if (tg) {
   tg.ready();
   tg.expand();
+
+  // Swipe-down-to-close/minimize is permanently off, so scrolling a
+  // list at the top can never drag the whole app down and close it.
+  try { tg.disableVerticalSwipes?.(); } catch (_) {}
 }
 
 // Syncs Telegram's chrome + the theme-color meta tag with whatever
@@ -3954,7 +3958,9 @@ let queueDrag = null;
 // horizontal carousel) and only switched back on when the last one is
 // done, so two features can't turn it back on underneath each other.
 // Telegram Bot API 7.7+; older clients (or outside Telegram) skip it.
-const verticalSwipeHolds = new Set();
+// "always" is a permanent hold: the set is never empty, so the
+// gesture is never switched back on.
+const verticalSwipeHolds = new Set(["always"]);
 
 function holdVerticalSwipes(owner, hold) {
   if (hold) verticalSwipeHolds.add(owner);
